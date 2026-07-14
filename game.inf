@@ -14,7 +14,7 @@ Include ">abbreviations.h";
 !  Game constants
 ! ####################################
 
-Constant Story	  "Mad Man";
+Constant Story	  "Madman";
 Constant Headline   "^An interactive race against the clock^^
 						Type ABOUT for credits.^^";
 Constant NO_PLACES;
