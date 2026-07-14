@@ -100,10 +100,18 @@ Fake_Action DropAllBut;
 	}
 ];
 
-
 ! ####################################
 !  Game globals, properties etc
 ! ####################################
+
+Property get_shot_at;
+Property break_it;
+Property read_description;
+Property simple_name;
+
+Property maybe_get_shot alias time_left; 
+Property bullets alias time_left; 
+Property make_sharp alias time_left; 
 
 Global killed = 7; ! w in Basic program
 Global faint = 0; ! fa in Basic program
@@ -229,8 +237,6 @@ Class DoorClass
 			rtrue;
 		],
 	has static door openable lockable locked;
-
-!Constant TEST_STUFF;
 
 ! Room 1
 Object Bedroom "Bedroom"
@@ -1774,7 +1780,6 @@ Object BigBomb "big bomb"
 		];
 
 [ Initialise x;
-!	debug_flag = $ffff;
 
 ! Get rid of warnings
 	x = _verb_grammar_end;
@@ -1791,6 +1796,7 @@ Object BigBomb "big bomb"
 	Telephone.each_turn();
 	PlayerTo(Bedroom,1);
 	StartDaemon(player);
+	
 	return 2;
 ];
 
