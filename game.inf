@@ -1,0 +1,1800 @@
+!% -~S
+!% $OMIT_UNUSED_ROUTINES=1
+!% $ZCODE_LESS_DICT_DATA=1
+!% $LONG_DICT_FLAG_BUG=0
+!% $ZCODE_COMPACT_GLOBALS=1
+!% $MAX_ABBREVS=96
+!% $ZCODE_MAX_INLINE_STRING=1200
+!% $TRANSCRIPT_FORMAT=1
+!!% $OMIT_SYMBOL_TABLE=1 ! Saves space, only possible without DEBUG mode
+
+Include ">abbreviations.h";
+
+! ####################################
+!  Game constants
+! ####################################
+
+Constant Story	  "Mad Man";
+Constant Headline   "^An interactive race against the clock^^
+						Type ABOUT for credits.^^";
+Constant NO_PLACES;
+
+Release 0;
+Serial "260714";
+
+! Get your own unique IFID for your game at https://www.tads.org/ifidgen/ifidgen
+Array UUID_ARRAY string "UUID://F5627028-7964-4D05-A2A6-91BBDC351615//"; 
+#Ifdef UUID_ARRAY; #Endif;
+
+
+Constant OPTIONAL_DARKNESS;
+!Constant OPTIONAL_LOOKMODE;
+Constant OPTIONAL_PRONOUNS;
+Constant OPTIONAL_REACTIVE_PARSE_NAME;
+Constant OPTIONAL_SCRIPT;
+
+! Scoring
+!Constant NO_SCORE;
+Constant MAX_SCORE = 250; ! 165 for rooms, 35 for killing Madman, 50 for stopping bomb
+!Constant OPTIONAL_FULL_SCORE;
+Constant OPTIONAL_SCORED;
+Constant ROOM_SCORE = 11; ! 15 * 11 = 165p
+Constant OBJECT_SCORE = 5; ! Not used
+!Constant TASKS_PROVIDED; ! See DM4 for what else you need to define for this
+
+Constant STATUSLINE_SCORE; Statusline score;
+!Constant STATUSLINE_TIME; Statusline time;
+
+!Constant RUNTIME_ERRORS = 0; ! 0, 1 or 2. 0 = smallest file, 2 = most info
+
+Constant INITIAL_LOCATION_VALUE = Bedroom;
+
+Constant GamePreRoutine = _GamePreRoutine;
+
+! ####################################
+!  Library initialization
+! ####################################
+
+Replace EndOfGame;
+
+[ EndOfGame;
+	return _EndOfGame();
+];
+
+Include "nail.h";
+
+Fake_Action TakeAllBut;
+Fake_Action DropAllBut;
+
+[ _EndOfGame;
+	_UpdateScoreOrTime();
+	@new_line;
+	if(deadflag == GS_QUIT) @quit;
+	print "^  * ";
+	if(deadflag == GS_WIN) PrintMsg(MSG_YOU_HAVE_WON);
+	else if(deadflag == GS_DEAD) PrintMsg(MSG_YOU_HAVE_DIED);
+#Ifdef DeathMessage;
+	else if(deadflag >= GS_DEATHMESSAGE) DeathMessage();
+#Endif;
+	print " *^^";
+#Ifndef NO_SCORE;
+	<Score>;
+#Endif;
+	for(::) {
+		PrintMsg(MSG_RESTART_RESTORE_OR_QUIT);
+		_ReadPlayerInput(true);
+		verb_word = parse-->1;
+		if(verb_word == 'restart') {
+			print"^Press any key to play. Let's go.....";
+			_ReadPlayerInput(true, true);
+			@restart;
+		}
+		if(verb_word == 'restore') <Restore>;
+#Ifdef Amusing;
+		if(AMUSING_PROVIDED == 0 && deadflag == 2 && verb_word == 'amusing') Amusing();
+#Endif;
+		if(verb_word == 'quit') @quit;
+#IfDef OPTIONAL_FULL_SCORE;
+		if(verb_word == 'full') <FullScore>;
+#EndIf;
+	}
+];
+
+
+! ####################################
+!  Game globals, properties etc
+! ####################################
+
+Global killed = 7; ! w in Basic program
+Global faint = 0; ! fa in Basic program
+Global help_count = 0;
+Global high_temp = 0; ! ht in Basic program
+Global w1 = 0; ! Time passed, around bus stop
+Global robbed = 0; ! ro in Basic program
+Global inhaled_gas; ! o in Basic program
+
+[ Hurrah;
+	deadflag = GS_WIN;
+	score = score + 50;
+	"     **HURRAH!**^^^
+		You have completed your mission.
+        ^   CONGRATULATIONS!";
+];
+
+[ ByeBye p_dead;
+	if(p_dead)
+		print "^I'M DEAD!!^";
+	deadflag = GS_DEAD;
+];
+
+Constant PS_NORMAL = 0;
+Constant PS_SMALL = 1;
+Constant PS_BIG = 2;
+Global player_size = PS_NORMAL;
+
+[ MoveTakeable p_from p_to _obj;
+	objectloop(_obj)
+		if(_obj in p_from && _obj hasnt static or scenery && _obj.&found_in == 0)
+			move _obj to p_to;
+];
+
+[ BeSmall;
+	player_size = PS_SMALL;
+	if(Mirror has absent) {
+		give LittleHole absent;
+		give BigHole ~absent;
+	}
+	if(player in LittleRoom)
+		PlayerTo(BigRoom, true);
+	else
+		MoveFloatingObjects();
+	MoveTakeable(LittleRoom, BigRoom);
+	"Oops! It feels very odd inside. I'm now 2 FEET TALL!!";
+];
+
+[ BeNormal;
+	player_size = PS_NORMAL;
+	if(Mirror has absent) {
+		give LittleHole ~absent;
+		give BigHole absent;
+	}
+	if(player in BigRoom)
+		PlayerTo(LittleRoom, true);
+	else
+		MoveFloatingObjects();
+	MoveTakeable(BigRoom, LittleRoom);
+	
+	"Oops! It feels very odd inside. I'm now in NORMAL SIZE!!";
+];
+
+[ BeBig;
+	player_size = PS_BIG;
+	"Oops! It feels very odd inside. I'm now 8 FEET TALL!!";
+];
+
+! ####################################
+!  Dictionary
+! ####################################
+
+! Set constant names for dictionary words we want to name explicitly
+
+Include ">generated_dictionary.h";
+
+! ####################################
+!  Parser, actions and grammar
+! ####################################
+
+Include ">generated_parser.h";
+
+Include ">generated_grammar.inf";
+
+
+[ _GamePreRoutine;
+	if(faint && action ~= ##Inv or ##Quit or ##Help or ##Drink)
+		"I'm to faint..";
+	rfalse;
+];
+
+! ####################################
+!  Game objects
+! ####################################
+
+Object selfobj "yourself"
+	with
+		nouns 'me' 'myself' 'yourself',
+		get_shot_at [;
+			ByeBye(true);
+			rtrue;
+		],
+		daemon [;
+			if(Madman has animate && random(40)==17) {
+				killed++;
+				if(TestScope(Radio))
+				print"^Some sounds comes from the RADIO!^";
+				if(killed > 19) {
+					print "^The madman has now killed 20 persons.^";
+					ByeBye();
+					rtrue;
+				}
+			}
+		],
+	has animate proper transparent;
+
+Class DoorClass
+	with
+		nouns 'door',
+		short_name [; 
+			if(self has open) print "Open "; else print "Closed ";
+			print "door";
+			rtrue;
+		],
+	has static door openable lockable locked;
+
+!Constant TEST_STUFF;
+
+! Room 1
+Object Bedroom "Bedroom"
+	with
+		description "I'm in a bedroom.",
+		after [;
+			Take:
+				if(noun == Rug) {
+					give BedroomHole ~absent;
+					MoveFloatingObjects();
+				}
+			Drop:
+				if(noun == Rug) {
+					give BedroomHole absent;
+					MoveFloatingObjects();
+				}
+		],
+		d_to [;
+			if(BedroomHole in real_location)
+				return BedroomHole;
+		],
+		w_to BedroomDoor,
+	has light;
+
+! Object 1
+Object -> Money "Some money"
+	with nouns 'some' 'money',
+	has general proper;
+
+! Object 2
+Object -> Radio "Strange radio"
+	with 
+		nouns 'strange' 'radio',
+		description "It's something loose in it.",
+		before [;
+			Listen:
+				"The madman has now killed ", killed, " persons.";
+		],
+		break_it [;
+			if(real_location ~= Attic) "No. I still need it.";
+			remove self;
+			move LittleBomb to real_location;
+			scope_modified = true;
+			"OK. Something fell to the floor.^
+				The pieces of the radio VANISHES!";
+		],
+	has;
+
+! Object 3
+Object -> Rug "Rug"
+	with nouns 'rug',
+	has general;
+
+Object -> Telephone "Telephone"
+	with 
+		nouns 'telephone' 'phone',
+		each_turn [;
+			if(self has general)
+				print "^The telephone is ringing!^";
+		],
+		before [;
+			Answer, Take:
+				if(self hasnt general) "It's not ringing.";
+				give self ~general;
+				"Hello. It's your boss speaking. There is
+					a madman loose in town. Your job is to
+					stop him before he blow the brain of 20 
+					persons.^
+					Or he kills you...^
+					He has allready killed ",killed," persons.^
+					CLICK!!!";
+		],
+	has static general reactive;
+
+DoorClass -> BedroomDoor "d1"
+	with 
+		before [;
+			Close:
+				if(self hasnt open)
+					"It's not open.";
+				give self ~open;
+				"OK";
+		],
+!		found_in Bedroom Garden,
+		door_dir (w_to), ! (e_to),
+		door_to Garden
+	has ~locked;
+
+Object BedroomHole "Hole"
+	with
+		nouns 'hole',
+		describe [;
+			if(real_location == Cellar) return 2;
+		],
+		found_in Bedroom Cellar,
+		door_dir (d_to) (u_to),
+	has static door open absent;
+
+! Room 2
+Object Cellar "Cellar"
+	with
+		description "I'm in a cellar.",
+		after [;
+			Look:
+				print "I can also go UP.^";
+				rfalse;
+		],
+		u_to BedroomHole,
+		e_to CellarDoor,
+	has light scored;
+
+! Object 4
+Object -> Jacket "Bullet proof jacket"
+	with 
+		nouns 'bullet' 'proof' 'jacket',
+		invent [;
+			if(self in player && self has worn) {
+				print "I'm wearing a bullet proof jacket";
+				rtrue;
+			}
+		],
+		before [;
+			Drop:
+				if(self in player && self has worn) {
+					give self ~worn;
+					remove self;
+					scope_modified = true;
+					"OK. The jacket.... VANISHES....!^
+					It feels better now.";
+				}
+		],
+	has clothing;
+
+DoorClass -> CellarDoor "d2"
+	with
+		door_dir (e_to),
+		door_to Sauna,
+		with_key PurpleKey;
+
+! Room 3
+Object Garden "Garden"
+	with
+		description "I'm in a garden.",
+		e_to Bedroom,
+		maybe_get_shot [;
+			if(Jacket notin player || Jacket hasnt worn) {
+				print "^Someone shot me!!^";
+				ByeBye(true);
+				rtrue;
+			}
+		],
+		before [;
+			Going:
+				return self.maybe_get_shot();
+		],
+		each_turn [;
+			self.maybe_get_shot();
+		],
+	has light scored reactive;
+
+Object -> GardenStone "Stone"
+	with nouns 'stone',
+	before [;
+		Take:
+			"It's to heavy to LIFT.";
+		Push, Pull:
+			if(self hasnt general) {
+				give self general;
+				move PurpleKey to real_location;
+				scope_modified = true;
+			}
+			"OK";
+	];
+
+! Object 16
+Object PurpleKey "Purple key"
+	with nouns 'purple' 'key',
+	has general;
+
+! Room 4
+Object Sauna "Sauna"
+	with
+		description "I'm in a sauna.",
+		before [;
+			Going:
+				if(BedroomDoor has open) {
+					print"AAAAH!! Someone came behind me and cutted my throat!
+							My last thought was 'OH..I forgotten to close 
+							th...^";
+					ByeBye(true);
+				}
+		],
+		each_turn [;
+			if(Jacket in player && Jacket has worn) {
+				high_temp++;
+				print "^It's very hot here!^";
+				if(high_temp > 3) {
+					print"I got overheathed and collapsed.^";
+					ByeBye(true);
+				}
+			}
+		],
+		s_to SaunaDoor,
+		e_to Bathroom,
+		w_to Cellar,
+	has light scored reactive;
+
+! Object 5
+Object -> Gun "Gun"
+	with
+		description [;
+			if(self.bullets == 0)
+				"It's empty.";
+			"It's loaded.^", self.bullets, " bullets left.";
+		],
+		nouns 'gun',
+		bullets 0
+	has;
+
+! Object 7
+Object -> Letter "Letter"
+	with 
+		nouns 'letter',
+		description "It's something written there.",
+		read_description "In many cases RED is GOOD in others...",
+	has general;
+
+DoorClass -> SaunaDoor "d3"
+	with 
+		description [;
+			if(Padlock in self)
+				"It's locked with a big padlock.";
+			PrintMsg(MSG_EXAMINE_NOTHING_SPECIAL, self);
+		],
+		door_dir (s_to),
+		door_to [;
+			if(player_size == PS_SMALL)
+				return BigRoom;
+			return LittleRoom;
+		],
+!		with_key PurpleKey,
+	has transparent;
+
+Object -> -> Padlock "Padlock"
+	with
+		nouns 'padlock' 'pad' 'lock',
+		break_it [;
+			"That's a very sturdy padlock.";
+		],
+		get_shot_at [;
+			give SaunaDoor ~locked;
+			remove self;
+			scope_modified = true;
+			print "The padlock went in thousand pieces and VANISHED!^";
+			rtrue;
+		];
+
+! Room 5
+Object Bathroom "Bathroom"
+	with
+		description "I'm in a bathroom.",
+		w_to Sauna,
+	has light;
+
+! Object 6
+Object -> Ammunition "Ammunition"
+	with 
+		nouns 'ammunition' 'ammo' 'bullets' 'rounds',
+		bullets 6,
+	has general;
+
+Object -> BathroomNote "Note nailed to the wall."
+	with
+		nouns 'note' 'nailed',
+		description "It's something written there.",
+		read_description "In this case HELP might help.",
+		before [;
+			Take, Pull, Push, Turn: "Better leave it be.";
+		],
+	has static;
+
+! Room 6
+Object LittleRoom "Little room"
+	with
+		description "I'm in a little room.",
+		n_to Sauna,
+	has light scored;
+
+! Object 8
+Object -> RedPill "Pill. Colour: RED"
+	with
+		nouns 'pill' 'colour' 'color' 'red',
+		before [;
+			Eat:
+				print "OK^";
+				remove self;
+				scope_modified = true;
+				if(player_size == PS_NORMAL)
+					BeSmall();
+				else ! Player is big
+					BeNormal();
+				rtrue;
+		],
+	has general;
+
+! Object 9
+Object -> BluePill "Pill. Colour: BLUE"
+	with
+		nouns 'pill' 'colour' 'color' 'blue',
+		before [;
+			Eat:
+				print "OK^";
+				remove self;
+				scope_modified = true;
+				if(player_size == PS_NORMAL)
+					BeBig();
+				else ! Player is small
+					BeNormal();
+				rtrue;
+		],
+	has general;
+
+Object Mirror "Mirror"
+	with
+		nouns 'mirror',
+		description "Today I seem to be angry.",
+		break_it [;
+			give self absent;
+			give PiecesOfMirror ~absent;
+			if(real_location == BigRoom) give BigHole ~absent;
+			else give LittleHole ~absent;
+			scope_modified = true;
+			MoveFloatingObjects();
+			if(itobj == self)
+				PronounNotice(PiecesOfMirror);
+			"CRACK!!";
+		],
+		found_in LittleRoom BigRoom,
+	has static;
+
+Object PiecesOfMirror "Pieces of a mirror"
+	with
+		parse_name [ _i _w;
+			_w = NextWord();
+			if(_w == 'piece' or 'pieces') { 
+				_i++; 
+				_w = NextWord();
+				while(_w == 'of' or 'a//') {
+					_i++;
+					_w = NextWord();
+				}
+			}
+			if(_w == 'mirror')
+				_i++;
+			return _i;
+		],
+		found_in LittleRoom BigRoom,
+	has static absent pluralname reactive;
+
+Object LittleHole "Little hole"
+	with
+		nouns 'little' 'hole',
+		before [ ;
+			Enter:
+				"I'm to BIG!";
+		],
+		found_in LittleRoom Streets,
+	has static absent;
+
+! Room 7
+Object BigRoom "Big room"
+	with
+		description "I'm in a big room.",
+		n_to Sauna,
+	has light;
+
+Object BigHole "Big hole"
+	with
+		nouns 'big' 'hole',
+		before [ _dest;
+			Enter:
+				_dest = BigRoom;
+				if(real_location == BigRoom)
+					_dest = Streets;
+				print "OK^";
+				PlayerTo(_dest);
+				rtrue;
+		],
+		found_in BigRoom Streets,
+	has static absent;
+
+! Room 8
+Object Streets "Streets"
+	with
+		description "I'm in a maze of streets.",
+		n_to Streets,
+		s_to Streets,
+		e_to Streets,
+		w_to Streets,
+		d_to SubwayStation,
+	has light scored;
+
+Object -> TallBuildings "Tall buildings"
+	with
+		nouns 'tall' 'building' 'buildings',
+		before [;
+			Examine: rfalse;
+			default:
+				PrintMsg(MSG_ABSURD);
+				rtrue;
+		],
+	has static pluralname;
+
+Object -> People "Lots of people"
+	with
+		parse_name [ _i _w;
+			_w = NextWord();
+			if(_w == 'lots') { 
+				_i++; 
+				_w = NextWord();
+				if(_w == 'of') {
+					_i++;
+					_w = NextWord();
+				}
+			}
+			if(_w == 'people')
+				_i++;
+			return _i;
+		],
+		get_shot_at [;
+			print "The cops came and got me!^";
+			ByeBye();
+			rtrue;
+		],
+		before [;
+			Attack:
+				"NO! I'm a police. Not a bandit.";
+			Examine, Shoot: rfalse;
+			default:
+				PrintMsg(MSG_ABSURD);
+				rtrue;
+		],
+	has static proper pluralname reactive;
+
+Object -> StairInStreet "Stair Leading Down"
+	with
+		nouns 'stair' 'stairs',
+		before [ ;
+			Enter:
+				print "OK^";
+				PlayerTo(SubwayStation);
+				rtrue;
+		],
+	has static;
+
+! Room 9
+Object SubwayStation "Subway station"
+	with
+		description "I'm in a subway station.",
+		w_to Streets,
+	has light;
+
+! Object 17
+Object -> Ticket "Ticket"
+	with nouns 'ticket',
+	before [;
+		Buy:
+			if(self has concealed) {
+				if(Money in player) {
+					remove Money;
+					move self to player;
+					give self ~concealed;
+					update_moved = true;
+					"OK";
+				} else
+					"I don't have any money.";
+			} else
+				"I have already bought it.";
+		default:
+			if(self has concealed)
+				"I don't have a ticket.";
+	],
+	has general concealed;
+
+Object -> SubwayStationSign "Sign"
+	with
+		nouns 'sign',
+		description "It's something written there.",
+		read_description "PRICES:  One ticket 1 $.",
+	has static;
+
+Object -> Train "Train"
+	with
+		nouns 'train',
+		before [ _dest;
+			Take, Push, Pull, Turn:
+				PrintMsg(MSG_ABSURD);
+				rtrue;
+			Enter:
+				if(Ticket notin player) {
+					PrintMsg(MSG_CANT_DO_THAT_YET);
+					rtrue;
+				}	
+				if(player_size == PS_SMALL)
+					"Children are not allowed to travel alone.";
+				print "OK^The train stops after a while. I wen't off.^";
+				_dest = SubwayStation2;
+				if(real_location == SubwayStation2)
+					_dest = SubwayStation;
+				PlayerTo(_dest);
+				rtrue;
+		],
+		found_in SubwayStation SubwayStation2,
+	has static;
+
+! Room 10
+Object SubwayStation2 "Subway station"
+	with
+		description "I'm in a subway station.",
+		u_to StairInSubwayAndHarbour,
+	has light scored;
+
+Object -> StairInSubwayAndHarbour "Stair"
+	with
+		nouns 'stair' 'stairs',
+		before [;
+			Enter:
+				print "OK^";
+		],
+		short_name [;
+			print "Stair leading ";
+			if(real_location == SubwayStation2) print "up";
+			else print "down";
+			rtrue;
+		],
+		found_in SubwayStation2 Harbour,
+		door_dir (u_to) (d_to),
+	has static door open;
+
+! Room 11
+Object Harbour "Harbour"
+	with
+		description "I'm in the harbour.",
+		e_to OutsideWarehouse,
+		w_to PartOfHarbour,
+		d_to StairInSubwayAndHarbour,
+	has light;
+
+Object -> Ship "Ship"
+	with
+		nouns 'ship',
+		before [;
+			Take, Push, Pull, Turn:
+				PrintMsg(MSG_ABSURD);
+				rtrue;
+		],
+	has static;
+
+Object -> Sailor "Drunken sailor"
+	with
+		nouns 'drunken' 'sailor',
+		before [;
+			Listen:
+				"The only thing I can get is: ..Stab him..";
+		],
+		get_shot_at [;
+			print "The cops came and got me!^";
+			ByeBye();
+			rtrue;
+		],
+		each_turn "^Someone is mumbeling.",
+	has animate reactive;
+
+! Room 12
+Object PartOfHarbour "Part of harbour"
+	with
+		description "I'm in a part of the harbour.",
+		e_to Harbour,
+	has light;
+
+Object -> AdvertismentSign "Advertisment sign" ! [SIC]
+	with
+		nouns 'advert' 'ad' 'sign',
+		description "It's something written there.",
+		read_description "Coca-Cola adds life!",
+	has static;
+
+! Room 13
+Object OutsideWarehouse "Outside warehouse"
+	with
+		description "I'm outside a big warehouse.",
+		s_to PartOfHarbour2,
+		w_to Harbour,
+		in_to Warehouse,
+	has light;
+
+Object -> WarehouseDummy "Warehouse"
+	with
+		nouns 'warehouse' 'ware' 'house',
+		before [;
+			Climb:
+				print "OK^";
+				PlayerTo(RoofOfWarehouse);
+				rtrue;
+			Open:
+				"The warehouse door stands slightly ajar.";
+			Close:
+				"I don't want to close it.";
+			Enter:
+				<<Go FAKE_IN_OBJ>>;
+!				print "OK^";
+!				PlayerTo(Warehouse);
+!				rtrue;
+		],
+	has concealed static scenery;
+
+! Object 10
+Object -> Flashlight "Electric torch"
+	with 
+		nouns 'electric' 'torch' 'flashlight' 'lamp',
+		after [;
+			SwitchOn:
+				give self light;
+			SwitchOff:
+				give self ~light;
+		],
+	has switchable;
+
+! Room 14
+Object Warehouse "Warehouse"
+	with
+		description "I'm in a warehouse.",
+		w_to OutsideWarehouse,
+		out_to OutsideWarehouse,
+	has ~light scored;
+
+Object -> Steelboxes "Some steelboxes"
+	with
+		longnouns 'steelboxes' 'steel' 'boxes' 'steelbox' 'box',
+		before [;
+			Take, Push, Pull, Turn:
+				"They're way too heavy.";
+			Open:
+				"Can't be opened.";
+		],
+	has proper pluralname;
+
+Object -> Woodbox "One woodbox"
+	with
+		nouns 'woodbox' 'wood' 'wooden' 'box',
+		before [;
+			Take, Push, Pull, Turn:
+				"It's way too heavy.";
+			Open:
+				if(Hammer notin player) "I'll need a hammer!";
+				remove self;
+				move WoodboxPieces to Warehouse;
+				move Bottle to Warehouse;
+				scope_modified = true;
+				"OK^The box fell apart.";
+		],
+	has proper;
+
+Object WoodboxPieces "Pices of a box"
+	with
+		parse_name [ _i _w;
+			_w = NextWord();
+			if(_w == 'piece' or 'pieces' or 'pice' or 'pices') { 
+				_i++; 
+				_w = NextWord();
+				while(_w == 'of' or 'a//') {
+					_i++;
+					_w = NextWord();
+				}
+			}
+			if(_w == 'wood' or 'wooden' or 'box')
+				_i++;
+			return _i;
+		],
+	has proper pluralname reactive;
+
+! Object 18
+Object Bottle "Bottle"
+	with
+		nouns 'bottle',
+		description [;
+			if(Coke in self)
+				"It's some Coke there.";
+			"It's empty.";
+		],
+		before [;
+			Receive:
+				"That doesn't fit.";
+		],
+	has general container open transparent;
+
+Object -> Coke "Coke"
+	with
+		nouns 'coke' 'cocacola' 'coca-cola',
+		before [;
+			Examine: rfalse;
+			Drink:
+				faint = 0;
+				remove self;
+				scope_modified = true;
+				"OK";
+			default:
+				"I can't!!";
+		];
+
+! Room 15
+Object PartOfHarbour2 "Part of harbour"
+	with
+		description "I'm in the part of the harbour.",
+		n_to OutsideWarehouse,
+		s_to HarbourGate,
+	has light;
+
+! Object 11
+Object -> Hammer "Hammer"
+	with
+		nouns 'hammer',
+	has general;
+
+!DoorClass -> HarbourDoor "d4"
+!	with 
+!		door_dir (s_to),
+!		door_to Suburb,
+!!		with_key PurpleKey,
+!;
+
+DoorClass -> HarbourGate "g1"
+	with
+		nouns 'gate',
+		simple_name "gate",
+		short_name [; 
+			if(self has open) print "Open "; else print "Closed ";
+			print "gate";
+			rtrue;
+		],
+		door_dir (s_to),
+		door_to Suburb,
+!		found_in PartOfHarbour2 Suburb
+		with_key GreenKey;
+
+
+! Room 16
+Object RoofOfWarehouse "Roof of warehouse"
+	with
+		description "I'm on the roof of a big warehouse.",
+		before [;
+			Jump:
+				print "OK^";
+				PlayerTo(Roof);
+				rtrue;
+		],
+		d_to OutsideWarehouse,
+	has light;
+
+Object -> WarehouseDummy2 "Warehouse"
+	with
+		nouns 'warehouse' 'ware' 'house' 'down',
+		before [;
+			Climb:
+				print "OK^";
+				PlayerTo(OutsideWarehouse);
+				rtrue;
+			Open, Close, Enter:
+				"Not from up here.";
+		],
+	has concealed static scenery;
+
+Object RoofDummy "One yard from here there is another roof."
+	with
+		nouns 'another' 'other' 'roof',
+		before [;
+			Jump:
+				<<Jump>>;
+			Climb, Enter:
+				"I can't quite reach it from where I stand.";
+		],
+		found_in RoofOfWarehouse Roof,
+	has static;
+
+! Room 17
+Object Roof "Roof"
+	with
+		description "I'm on a roof.",
+		before [;
+			Jump:
+				print "OK^";
+				PlayerTo(RoofOfWarehouse);
+				rtrue;
+		],
+	has light scored;
+
+! Object 12
+Object -> GreenKey "Green key"
+	with nouns 'green' 'key',
+	has general;
+
+! Room 18
+Object Suburb "Suburb"
+	with
+		description "I'm in a suburb.",
+		n_to PartOfHarbour2,
+		e_to BusStop,
+		w_to NearChurch,
+		each_turn [;
+			if(w1 == 1 && Watch hasnt general) {
+				give Watch general;
+				"^Some time has passed.";
+			}
+		],
+	has light reactive scored;
+
+Object -> HousesDummy "Lot's of houses."
+	with
+		longnouns 'lot^s' 'lots' 'of' 'houses' 'house',
+		before [;
+			Take, Push, Pull, Turn:
+				PrintMsg(MSG_ABSURD);
+				rtrue;
+		],
+	has static pluralname;
+
+! Room 19
+Object BusStop "Bus stop"
+	with
+		description "I'm at a bus stop.",
+		w_to Suburb,
+		each_turn [;
+			if(w1 == 2) {
+				w1 = 3;
+				"^NO! I just missed the bus.";
+			}
+		],
+	has light reactive;
+
+! Object 13
+Object -> Knife "knife"
+	with
+		nouns 'dull' 'knife',
+		short_name [; 
+			if(self has general) print "Sharp "; else print "Dull ";
+		],
+		make_sharp [;
+			self.&nouns-->0 = 'sharp';
+			give self general;
+		],
+	;
+
+Object -> BusStopSign "Sign"
+	with
+		nouns 'sign',
+		description "It's something written there.",
+		read_description "The bus goes at: 6:30 PM",
+	has static;
+
+! Room 20
+Object NearChurch "Nearby church"
+	with
+		description "I'm nearby a church.",
+		before [;
+			Go:
+				if(direction == s_to &&
+						NearChurchDoor has open) {
+					print "OK^";
+					PlayerTo(Room, true);
+					rtrue;
+				}
+		],
+		e_to Suburb,
+		s_to NearChurchDoor,
+	has light;
+
+! Object 14
+Object -> Stone "Stone"
+	with
+		nouns 'stone',
+	has general;
+
+Object -> Watch "Watch on the wall"
+	with
+		nouns 'watch' 'clock',
+		description [;
+			if(self hasnt general) {
+				w1 = 1;
+				"It's 6:25 PM";
+			}
+			w1=2;
+			"It's 6:30 PM";
+		],
+		before [;
+			Take, Push, Pull, Turn:
+				"It's way out of reach.";
+		],
+	has static;
+
+Object -> Rope "Rope"
+	with
+		nouns 'rope',
+		short_name [;
+			print "Rope";
+			if(NearChurchDoor has locked)
+				print " which closes the door";
+			rtrue;
+		],
+		before [;
+			Cut:
+				if(second ~= 0 or Knife)
+					"That doesn't work.";
+				if(Knife notin player)
+					"Cut with WHAT??";
+				if(Knife hasnt general)
+					"The knife made no impression on it.";
+				give NearChurchDoor ~locked;
+				"OK";
+		],
+	has static;
+
+DoorClass -> NearChurchDoor "d5"
+	with
+		door_dir (s_to), ! (n_to),
+		door_to Room,
+!		found_in NearChurch,! Room,
+!		with_key PurpleKey,
+	;
+
+! Room 21
+Object Room "Room"
+	with
+		description "I'm in a room.",
+		!n_to NearChurchDoor,
+		before [;
+			Go:
+				if(direction == w_to && HoleInDoor hasnt absent)
+					<<Enter HoleInDoor>>;
+		],
+		each_turn [;
+			if(robbed == 0) {
+				robbed = 1;
+				faint = 1;
+				move Stone to Room2;
+				if(Knife in player)
+					move Knife to Attic;
+				if(Gun in player)
+					move Gun to Attic;
+				scope_modified = true;
+				"I'm hear footsteps behind me..^
+					EVERYTHING SPINS AROUND!!^
+					I'm somewere else. I've been robbed.^";
+			}
+		],
+		e_to Kitchen,
+		w_to RoomDoor,
+	has ~light reactive;
+
+DoorClass RoomDoor "d6"
+	with
+		nouns 'wood' 'wooden' 'door',
+		short_name "Closed wood door",
+		before [;
+			Kick:
+				if(HoleInDoor hasnt absent) rfalse;
+				give HoleInDoor ~absent;
+				MoveFloatingObjects();
+				"BANZAI!";
+		],
+		found_in Room Hall,
+		door_dir (w_to) (e_to),
+!		door_to Hall,
+!		with_key PurpleKey,
+	;
+
+Object HoleInDoor "Hole in the door"
+	with
+		nouns 'hole',
+		before [ _dest;
+			Enter:
+				_dest = Room;
+				if(real_location == Room)
+					_dest = Hall;
+				print "OK^";
+				PlayerTo(_dest);
+				rtrue;
+		],
+		found_in Room Hall,
+	has static absent;
+
+! Room 22
+Object Kitchen "Kitchen"
+	with
+		description "I'm in a kitchen.",
+		w_to Room,
+	has light;
+
+! Object 21
+Object -> Letter2 "Letter"
+	with 
+		nouns 'letter',
+		description "It's something written there.",
+		read_description "Ali Baba was here.",
+	has general;
+
+
+Object -> Hatch "Closed hatch."
+	with
+		nouns 'hatch',
+		before [;
+			Open:
+				"It's stucked!";
+		],
+	has static openable;
+
+! Room 23
+Object Hall "Hall"
+	with
+		description "I'm in a hall.",
+		before [;
+			Go:
+				if(direction == e_to && HoleInDoor hasnt absent)
+					<<Enter HoleInDoor>>;
+		],
+		n_to Room2,
+		w_to EndOfHall,
+		e_to RoomDoor,
+	has light scored;
+
+! Room 24
+Object Room2 "Room"
+	with
+		description "I'm in a room.",
+		s_to Hall,
+	has light;
+
+! Room 25
+Object EndOfHall "End of hall"
+	with
+		description "I'm in the end of the hall.",
+		before [;
+			Say:
+				if(GlassDoor hasnt general ||
+						first_topic_word ~= 'sesam' or 'sesame') 
+					"Nothing happens.";
+				give GlassDoor ~locked;
+				"ZZZZZzzz  CLICK!";
+		],
+		e_to Hall,
+		w_to GlassDoor,
+	has light;
+
+DoorClass -> GlassDoor "d7"
+	with
+		nouns 'door' 'of' 'glass' 'glass-door',
+		short_name [;
+			if(self hasnt general) print "Door of glass ";
+			else if(self has open) print "Open door";
+			else print "Closed door";
+			rtrue;
+		],
+		before [;
+			Unlock:
+				if(self hasnt general) "It's all just a big plate of glass.";
+				"Actually, I can't even find a keyhole.";
+		],
+		break_it [;
+			if(self has general) "That seems pointless.";
+			if(second == 0) "Break it with WHAT??";
+			if(second ~= Stone) "I'd need a more suitable tool.";
+			give self general;
+			move PiecesOfGlass to EndOfHall;
+			scope_modified = true;
+			"CRACK!!";
+		],
+		door_dir (w_to),
+		door_to Attic;
+
+! Object 19
+Object PiecesOfGlass "Pieces of glass"
+	with nouns 'pieces' 'of' 'glass',
+	has general pluralname;
+
+! Room 26
+Object Attic "Attic"
+	with
+		description "I'm in a musty attic.",
+		e_to EndOfHall,
+		u_to AtticStair,
+	has light scored;
+
+DoorClass -> AtticStair "d8"
+	with 
+		nouns 'stair' 'stairs',
+		short_name "Stair leading up",
+		door_dir (u_to),
+		door_to OnRoof,
+	has open ~openable ~lockable ~locked
+	;
+
+! Dummy door, impossible to unlock
+DoorClass -> AtticDoor "d8"
+	with 
+		door_dir (w_to),
+		door_to Attic,
+!		with_key PurpleKey,
+	;
+
+! Object 20 (will appear in Attic, when player breaks radio)
+Object LittleBomb "Little bomb"
+	with 
+		nouns 'little' 'bomb',
+		description "There is a button on it.",
+!		before [;
+!			Throw:
+!				if(self notin player) rfalse;
+!				if(self hasnt general)
+!					<<Drop self>>;
+!				if(TestScope(Madman)) {
+!					give Madman ~animate;
+!					StopTimer(self);
+!					remove self;
+!					move Note to real_location;
+!					scope_modified = true;
+!					"BOOM!... The madman is now DEAD!!";
+!				}
+!		],
+		time_left 0,
+		time_out [;
+			if(TestScope(LittleBomb)) {
+				print"^BOOOOOM!!^";
+				ByeBye(true);
+				rtrue;
+			}
+			remove self;
+			print "^I hear a BOOOOM nearby.^";
+			if(TestScope(Madman)) {
+				print "^The madman turns AROUND!!^
+					HE SHOT ME!^";
+				ByeBye(true);
+			}
+			
+		],
+	has transparent;
+
+Object -> BombButton "Bomb button"
+	with
+		nouns 'button',
+		before [;
+			Push:
+				if(LittleBomb hasnt general) {
+					give LittleBomb general;
+					StartTimer(LittleBomb, 2);
+				}
+				"CLICK!";
+		];
+
+! Room 27
+Object OnRoof "On roof"
+	with
+		description "I'm on a roof in the city.",
+		s_to [;
+			if(Madman hasnt animate) return Elevator;
+			PrintMsg(MSG_CANT_DO_THAT_YET);
+			rtrue;
+		],
+		e_to Attic,
+		each_turn [;
+			if(superparent(Radio) == self) {
+				print "^The radio started to sound strange. 
+					The madman turns AROUND!!^
+					HE SHOT ME!^";
+				ByeBye(true);
+			}
+		],
+	has light reactive;
+
+Object -> Madman "The madman"
+	with
+		nouns 'madman' 'mad' 'man',
+		short_name [;
+			if(self has animate) rfalse;
+			print "Dead madman";
+			rtrue;
+		],
+		before [;
+			ThrownAt:
+				if(noun == LittleBomb && LittleBomb has general) {
+					score = score + 35;
+					give Madman ~animate;
+					StopTimer(noun);
+					remove noun;
+					move Note to real_location;
+					scope_modified = true;
+					"BOOM!... The madman is now DEAD!!";
+				}
+				remove noun;
+				scope_modified = true;
+				"I missed!";
+			Attack:
+				if(self hasnt animate) "He's already dead.";
+				"How?";
+			Stab:
+				if(second ~= 0 or Knife)
+					"Stab him with WHAT??";
+				if(Knife notin player)
+					"I don't have a knife.";
+				if(self hasnt animate) "He's already dead.";
+				"I can't reach him.";
+			Take: 
+				if(self hasnt animate)
+					"Eww!!";
+		],
+		get_shot_at [;
+			if(self has animate) {
+				print "I MISSED!! The madman turns AROUND!!^
+					HE SHOT ME!^";
+				ByeBye(true);
+				rtrue;
+			}
+		],
+	has animate;
+
+! Object 22, will appear here when madman dies
+Object Note "Note"
+	with 
+		nouns 'note',
+		description "It's something written there.",
+		read_description "I'll blow this town to HELL....",
+	has general;
+
+
+! Room 28
+Object Elevator "Elevator"
+	with
+		description "I'm in a elevator.",
+		before [;
+			Going:
+				StartDaemon(BigBomb);
+		],
+		n_to OnRoof,
+	has light scored;
+
+Object RedButton "Red button"
+	with
+		nouns 'red' 'button',
+		before [;
+			Push:
+				print"^BOOOOOM!!^";
+				ByeBye(true);
+				rtrue;
+		],
+		found_in Elevator Corridor,
+	has static;
+
+Object BlackButton "Black button"
+	with
+		nouns 'black' 'button',
+		before [ _dest;
+			Push:
+				print"OK. The elevator start moving. It stopped after a while.^";
+				_dest = Corridor;
+				if(real_location == Corridor) _dest = Elevator;
+				PlayerTo(_dest);
+				rtrue;
+		],
+		found_in Elevator Corridor,
+	has static;
+
+! Room 29
+Object Corridor "Corridor"
+	with
+		description "I'm in a corridor.",
+		w_to EndOfCorridor,
+	has light;
+
+! Room 30
+Object EndOfCorridor "End of corridor"
+	with
+		description "I'm in the end of the corridor.",
+		n_to Room3,
+		s_to EndOfCorridorDoor,
+		e_to Corridor,
+	has light;
+
+DoorClass -> EndOfCorridorDoor "d9"
+	with 
+		door_dir (s_to),
+		door_to Room4,
+		with_key WhiteKey,
+	;
+
+! Room 31
+Object Room3 "Room"
+	with
+		description "I'm in a room.",
+		s_to EndOfCorridor,
+		u_to RopeLowerEnd,
+	has light;
+
+Object -> RopeLowerEnd "Rope hanging down from abowe."
+	with
+		nouns 'rope',
+		before [;
+			Climb:
+				<<Enter self>>;
+		],
+		door_to OutsideWindow,
+		door_dir u_to,
+	has static door open;
+
+! Room 32
+Object OutsideWindow "Outside window"
+	with
+		description "I'm outside a window.",
+		d_to RopeUpperEnd,
+	has light;
+
+Object -> Window "Window"
+	with
+		nouns 'window',
+		description "It's very dirty. Maybe I should open it.",
+		before [;
+			Open:
+				print "I lost my grip on the rope...I FALL!!!^";
+				ByeBye(true);
+				rtrue;
+		],
+		describe 2,
+	has static openable locked;
+
+! Object 15
+Object -> WhiteKey "White key"
+	with
+		nouns 'white' 'key',
+	has general;
+
+Object -> RopeUpperEnd "Rope"
+	with
+		nouns 'rope',
+		before [;
+			Climb:
+				<<Enter self>>;
+		],
+		door_to Room3,
+		door_dir d_to,
+	has static door open;
+
+! Room 33
+Object Room4 "Room"
+	with
+		description [;
+			if(direction == s_to)
+				print "After walking through a short hallway, bending to the east, 
+					I come to an open space.^^";
+			"I'm in a room.";
+		],
+		before [;
+			Go:
+				if(direction == u_to && inhaled_gas == false) {
+					print "I'm to heavy. The ladder went off...^    I FALL!!^";
+					ByeBye(true);
+					rtrue;
+				}
+		],
+		w_to EndOfCorridor,
+		u_to RopeLadder,
+	has light scored;
+
+Object -> RopeLadder "Rope ladder"
+	with
+		nouns 'rope' 'ladder',
+		before [;
+			Climb:
+				<<Enter self>>;
+		],
+		door_to RedRoom,
+		door_dir u_to,
+	has static door open;
+
+Object -> Wardrobe "Wardrobe"
+	with
+		nouns 'wardrobe',
+		short_name [; 
+			if(self has open) print "Open "; else print "Closed ";
+			print "wardrobe";
+			rtrue;
+		],
+		description [;
+			print "The wardrobe contains:^";
+			TallPrintContents(self);
+		],
+		before [;
+			Enter:
+				if(self has open)
+					"I'm to big.";
+		],
+	has static container openable;
+
+Object -> -> GasTube "Helium gas tube"
+	with
+		nouns 'helium' 'gas' 'tube' 'button',
+		description "I can see a button.",
+		before [ ;
+			Take:
+				if(WordAddress(num_words)->0 ~= 'g') rfalse; ! Player didn't use the word "gas"
+				if(self has general) 
+					"Can't hold gas in my hand.";
+			Push:
+				if(WordAddress(num_words)->0 ~= 'b') rfalse; ! Player didn't use the word "button"
+				give self general;
+				StartTimer(self, 3); ! Gas in room is available for this move + 2 more
+				"Some gas came out.";
+			Inhale:
+				if(self has general) {
+					inhaled_gas = true;
+					"AAAH! I'm feeling much more light now.";
+				}
+		],
+		time_left 0,
+		time_out [;
+			give self ~general;
+		],
+	has static;
+
+! Object 23
+Object -> -> DivingSuit "Rubber diving suit"
+	with 
+		nouns 'rubber' 'diving' 'suit',
+		invent [;
+			if(self in player && self has worn) {
+				print "I'm wearing a rubber diving suit";
+				rtrue;
+			}
+		],
+		before [;
+			Drop:
+				if(self in player && self has worn)
+					"I can't.";
+		],
+	has clothing;
+
+! Room 34
+Object RedRoom "Red room"
+	with
+		description "I'm in a big red room.",
+		before [;
+			Sit:
+				if(noun == 0 || noun == Chair) {
+					if(DivingSuit notin player || DivingSuit hasnt worn) {
+						print "AAAH! HIGH VOLTAGE in the chair.^";
+						ByeBye(true);
+						rtrue;
+					}
+					print "OK^";
+					PlayerTo(InChair);
+					rtrue;
+				}
+		],
+		after [;
+			Look:
+				print "I can also go DOWN.^";
+				rfalse;
+		],
+		d_to Room4,
+	has light scored;
+
+Object -> Chair "Chair & a table"
+	with
+		nouns 'chair',
+	has static;
+
+Object -> Table "Table"
+	with
+		nouns 'table',
+		description "Can't see anyting.",
+		describe 2,
+	has static;
+
+Object -> SwimmingPool "Swimming pool"
+	with
+		nouns 'swimming' 'pool',
+		description "Can't see anything.",
+		before [;
+			Enter:
+				print "AAAH!! PIRAYAS!!^";
+				ByeBye(true);
+				rtrue;
+		],
+	has static;
+
+! Room 35
+Object InChair "In chair"
+	with
+		description "I'm sitting in a chair.",
+		before [;
+			Exit:
+				print "OK^";
+				PlayerTo(RedRoom);
+				rtrue;
+		],
+	has light scored;
+
+Object -> TableWhenInChair "Table"
+	with
+		nouns 'table',
+	has static;
+
+Object -> "Red button"
+	with
+		nouns 'red' 'button',
+		before [;
+			Push:
+				print"BOOOOOM!!^";
+				ByeBye(true);
+				rtrue;
+		],
+	has static;
+
+Object -> "Yellow button"
+	with
+		nouns 'yellow' 'button',
+		before [;
+			Push:
+				Hurrah();
+				rtrue;
+		],
+	has static;
+
+Object BigBomb "big bomb"
+	with
+		time_left 21, ! dx in Basic program
+		daemon [ dx;
+			dx = self.time_left - 1;
+			self.time_left = dx;
+			print"^", dx, " turns left to the BIG BANG!^";
+			if(dx < 1) {
+				deadflag = GS_DEAD;
+				"BOOOOOM!!";
+			}
+		];
+
+[ Initialise x;
+!	debug_flag = $ffff;
+
+! Get rid of warnings
+	x = _verb_grammar_end;
+#Ifdef DEBUG;
+	x = _debug_grammar;
+#Endif;
+#Ifdef OPTIONAL_SCRIPT;
+	x = _script_grammar;
+#Endif;
+
+	thedark.description = "TOO DARK TO SEE!!";
+
+	print "^^And once again it's morning...^";
+	Telephone.each_turn();
+	PlayerTo(Bedroom,1);
+	StartDaemon(player);
+	return 2;
+];
+
+
+
+
+

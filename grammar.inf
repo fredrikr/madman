@@ -1,0 +1,1972 @@
+! ####################################
+!  Grammar
+! ####################################
+
+[ BlockIfWorn p_obj;
+	if(p_obj == 0 || p_obj notin player || p_obj hasnt worn) rfalse;
+	"Not while wearing ", (the) p_obj, ".";
+];
+
+![ _ListObjsMsg p_parent;
+!	p_parent = 0; ! Avoid warning
+!	print "^You can ";
+!	if(also_flag) print "also ";
+!	print "see ";
+!];
+
+[ QuitSub;
+	PrintMsg(MSG_ARE_YOU_SURE);
+	if(YesOrNo()) {
+		print "Goodbye.^";
+		deadflag = GS_QUIT;
+	} else
+		rtrue;
+];
+
+[ RestartSub;
+	PrintMsg(MSG_ARE_YOU_SURE);
+	if(YesOrNo()) {
+		@restart;
+		return MSG_FAILED;
+	}
+];
+
+[ RestoreSub;
+	@restore ?_restore_was_successful; ! can't use @restore because of compiler test
+	return MSG_FAILED;
+._restore_was_successful;
+! This is never reached, since a successful restore continues after save opcode.
+	rtrue;
+];
+
+[ SaveSub;
+	@save ?_save_was_successful;
+	return MSG_FAILED;
+._save_was_successful;
+	return MSG_OK;
+];
+
+Global printed_banner = false;
+
+[ TallPrintContents p_parent p_workflag_only p_indent _obj _any _i _skip;
+	objectloop(_obj in p_parent) {
+		if(p_workflag_only == 0 || _obj has workflag) {
+			if(_any == 0) { new_line; _any = 1; }
+			for(_i = 0: _i < p_indent: _i++) print "  ";
+			_skip = false;
+			if(_obj.invent ~= 0)
+				_skip = PrintOrRun(_obj, invent, true);
+			if(_skip == false)
+				print (name) _obj;
+			if(_obj has supporter || 
+				(_obj has container && _obj has open or transparent) 
+					&& child(_obj))
+				TallPrintContents(_obj, 0, p_indent + 1);
+			else
+				new_line;
+		}
+	}
+	return _any;
+];
+
+Array dir_names -->
+	0 "NORTH" "SOUTH" "EAST" "WEST";
+	
+
+[ Look _ceil _obj _result _msg _action;
+
+	if(printed_banner == false) {
+		printed_banner = true;
+		Banner();
+	}
+
+!	_ceil = ScopeCeiling(player);
+	_ceil = location;
+
+#IfDef OPTIONAL_SCORED;
+	if(location has scored && location hasnt visited) {
+		score = score + ROOM_SCORE;
+#IfDef OPTIONAL_FULL_SCORE;
+		places_score = places_score + ROOM_SCORE;
+#EndIf;
+	}
+#EndIf;
+!	new_line;
+!	_PrintObjName(location);
+
+!	_obj = parent(player);
+!#Ifdef OPTIONAL_DARKNESS;
+!	if(location == thedark) {
+!		_obj = location;
+!	}
+!#Endif;
+!	if(_obj ~= location) {
+!		if(_obj has supporter) print " (On "; else print " (In ";
+!		print (the) _obj;
+!		print ")";
+!	}
+	new_line;
+!	if((lookmode == 1 && location hasnt visited) || lookmode == 2)
+		PrintOrRun(location, description);
+#Ifdef OPTIONAL_DARKNESS;
+	if(location == thedark) {
+		jump _EndOfLookRoutine;
+	}
+#Endif;
+
+	for(_obj = 1: _obj < 5: _obj++) {
+		if(real_location.(direction_properties_array->_obj)) {
+			if(_result == 0) {
+				new_line;
+				_result = 1;
+			}
+			print (string) dir_names-->_obj, " ";
+		}
+	}
+	if(_result) { new_line; }
+
+	also_flag = false;
+	! write intial and describe messages in a new paragraph
+	objectloop(_obj in _ceil)
+		if(_obj hasnt scenery or concealed && _obj ~= player) {
+			give _obj workflag;
+			if(_obj.&describe) {
+				_result = PrintOrRun(_obj, describe);
+				if(_result) {
+					give _obj ~workflag;
+					if(_result ~= 2) also_flag = true;
+					continue;
+				}
+			}
+			if(_obj.&initial && _obj hasnt moved) {
+				give _obj ~workflag;
+				new_line;
+				PrintOrRun(_obj, initial);
+				also_flag = true;
+			}
+		}
+
+!	_msg = "^You can see ";
+!	if(also_flag) _msg = "^You can also see ";
+	
+!	if(PrintContents(_msg, _ceil, WORKFLAG_BIT)) print " here.^";
+	_msg = 0;
+
+	TallPrintContents(_ceil, true);
+!	objectloop(_obj in _ceil) {
+!		if(_obj has workflag) {
+!			if(_msg == 0) { new_line; _msg = 1; }
+!			print (name) _obj;
+!			new_line;
+!		}
+!	}
+
+._EndOfLookRoutine;
+#Ifdef LookRoutine;
+	! finally, call the optional library entry routine
+	LookRoutine();
+#Endif;
+	_action = action; action = ##Look;
+	AfterRoutines();
+	action = _action;
+
+	give location visited;
+];
+
+[ LookSub _old_lookmode;
+	_old_lookmode = lookmode;
+	lookmode = 2; ! force long description
+	Look();
+	lookmode = _old_lookmode;
+];
+
+#Ifdef OPTIONAL_LOOKMODE;
+[ LookModeSub;
+	meta = true;
+	switch(parse-->3) {
+		'brief', 'normal': lookmode = 1;
+		'verbose', 'long': lookmode = 2;
+		'superbrief', 'short': lookmode = 3;
+	}
+	return MSG_OK;
+];
+#Endif;
+
+[ WaitSub;
+	"NO! Time is life!";
+!	run_after_routines_msg = "Time passes.";
+];
+
+[ ExamineSub;
+#Ifdef OPTIONAL_DARKNESS;
+	if(location == thedark) return MSG_ITS_DARK;
+#Endif;
+	if(noun.description == 0 or NULL) 
+		PrintMsg(MSG_EXAMINE_NOTHING_SPECIAL, noun);
+	else
+		RunRoutines(noun, description);
+	run_after_routines_msg = 1;
+];
+
+[ _SearchSubText p_obj;
+	if(p_obj has supporter)
+		print "On ";
+	else
+		print "In ";
+	print (ItOrThem) p_obj, ", I find ";
+];
+
+[ SearchSub;
+#Ifdef OPTIONAL_DARKNESS;
+	if(location == thedark) return MSG_ITS_DARK;
+#Endif;
+	if (ObjectIsUntouchable(noun)) return;
+	if(noun hasnt supporter or container)
+		return "I find nothing special.";
+		
+	if(noun has container && noun hasnt transparent && noun hasnt open)
+		print_ret (CObjIs) noun, " closed.";
+
+	if(PrintContents(_SearchSubText, noun)) 
+		print ".^";
+	else
+		print (CObjIs) noun, " empty.^";
+	
+	run_after_routines_msg = 1;
+];
+
+
+[ TakeSub _parent _container_or_supporter _obj _count;
+	if(CommonAncestor(player, noun) == 0) return MSG_ABSURD;
+	if(noun has animate) return MSG_ABSURD;
+	if(noun has static) return MSG_IS_STATIC;
+	if(noun in player) "I already have that.";
+	if(ObjectIsUntouchable(noun, false, true)) rtrue;
+	if(IndirectlyContains(noun, player)) { PrintMsg(MSG_EXIT, noun); rtrue; }
+
+	objectloop(_obj in player)
+		if(_obj ~= Jacket || _obj hasnt worn) _count++;
+	if(_count >= 3)
+		"I'm not the Superman. Can't carry anymore.";
+
+	_parent = parent(noun);
+	if(_parent has animate)
+		
+	if(_parent && _parent has container or supporter)
+		_container_or_supporter = true;
+	if(_container_or_supporter && _RunFakeAction(_parent, ##LetGo, before)) 
+		rtrue; 
+
+	move noun to player;
+	give noun ~worn ~concealed;
+	update_moved = true;
+
+	if(_container_or_supporter && _RunFakeAction(_parent, ##LetGo, after)) 
+		rtrue; 
+
+	run_after_routines_msg = MSG_OK;
+];
+
+
+![ TakeAllButSub _i _obj _loc _count;
+!	_loc = parent(player);
+!	GetScopeCopy();
+!	for(_i = 0: _i<scope_copy_objects: _i++) {
+!		_obj = scope_copy->_i;
+!		if(_obj in _loc && _obj ~= noun && 
+!				_obj hasnt scenery or static or animate or concealed) {
+!			_count++;
+!			if(keep_silent == 0) print (name) _obj, ": ";
+!			<Take _obj>;
+!		}
+!	}
+!	if(_count == 0) "There's nothing to take.";
+!	run_after_routines_msg = 1;
+!];
+
+[ DropSub _parent _is_obj;
+	if(noun == player) return MSG_ABSURD;
+	if(noun notin player) { PrintMsg(MSG_NOT_HOLDING, noun); rtrue; }
+	if(BlockIfWorn(noun)) rtrue;
+
+	_parent = parent(player);
+	if(_parent has container or supporter) {
+		_is_obj = true;
+		if(_RunFakeAction(_parent, ##Receive, before)) rtrue;
+	}
+	move noun to parent(player);
+	give noun moved ~worn ~concealed;
+#Ifdef OPTIONAL_DARKNESS;
+	if(location == thedark)
+		scope_modified = true;
+#Endif;
+	if(_is_obj && _RunFakeAction(_parent, ##Receive, after)) rtrue;
+
+	run_after_routines_msg = MSG_OK;
+];
+
+
+![ DropAllButSub _i _obj _count; 
+!	GetScopeCopy();
+!	for(_i = 0: _i<scope_copy_objects: _i++) {
+!		_obj = scope_copy->_i;
+!		if(_obj in player && _obj ~= noun && _obj hasnt worn) {
+!			_count++;
+!			if(keep_silent == 0) print (name) _obj, ": ";
+!			<Drop _obj>;
+!		}
+!	}
+!	if(_count == 0) "There's nothing to drop.";
+!	run_after_routines_msg = 1;
+!];
+
+[ WearSub;
+	if(noun == player) return MSG_ABSURD;
+	if(ImplicitGrabIfNotHeld(noun)) rtrue;
+	if(noun has worn) return "Already worn.";
+	if(noun hasnt clothing) return "Wear WHAT??";
+	give noun worn;
+	run_after_routines_msg = MSG_OK;
+];
+
+[ DisrobeSub;
+	if(noun == player) return MSG_ABSURD;
+	if(noun notin player || noun hasnt worn) 
+		"I'm not wearing ",(ItOrThem) noun,".";
+	if(noun hasnt clothing) return "That can't be worn.";
+	give noun ~worn;
+	run_after_routines_msg = MSG_OK;
+];
+
+[ _RunFakeAction p_obj p_action p_property _action _result;
+#IfDef DEBUG;
+	if(debug_flag & 1) print "[ ~", (name) p_obj, "~.", (property) p_property, "() ]^";
+#EndIf;
+	receive_action = action;
+	_action = action; action = p_action;
+	_result = RunRoutines(p_obj, p_property);
+	action = _action;
+	return _result;
+];
+
+[ InsertSub;
+	if(noun == player) return MSG_ABSURD;
+	if(ImplicitGrabIfNotHeld(noun)) rtrue;
+	if(second hasnt container) { return "I can't put anything inside that."; }
+	if(second hasnt open) { PrintMsg(MSG_OBJ_NOT_OPEN, second); rtrue; }
+	if(BlockIfWorn(noun)) rtrue;
+
+	if(_RunFakeAction(second, ##Receive, before)) rtrue; 
+
+	move noun to second;
+
+	if(_RunFakeAction(second, ##Receive, after)) rtrue; 
+
+	run_after_routines_msg = MSG_OK;
+];
+
+[ PutOnSub;
+	if(noun == player) return MSG_ABSURD;
+	if(ImplicitGrabIfNotHeld(noun)) rtrue;
+	if (ObjectIsUntouchable(second)) return;
+	if(second hasnt supporter) { return "I can't put anything on that."; }
+	if(BlockIfWorn(noun)) rtrue;
+
+	if(_RunFakeAction(second, ##Receive, before)) rtrue; 
+
+	move noun to second;
+
+	if(_RunFakeAction(second, ##Receive, after)) rtrue; 
+
+	run_after_routines_msg = MSG_OK;
+];
+
+![ ThrowAtSub;
+!	if(ImplicitGrabIfNotHeld(noun)) rtrue;
+!	if(second has supporter)
+!		<<PutOn noun second>>;
+!	if (ObjectIsUntouchable(second)) return;
+!	if(BlockIfWorn(noun)) rtrue;
+!	if(_RunFakeAction(second, ##ThrownAt, before)) rtrue;
+!	if(second has animate)
+!		return MSG_ATTACK_DEFAULT;
+!	return MSG_OK;
+!];
+
+[ OpenSub;
+	if(noun has open) "It's allready open.";
+	if(noun has locked) "It's locked.";
+	if(noun hasnt openable) return "Open WHAT??";
+	give noun open;
+	scope_modified = true;
+!	"You open ", (the) noun, ".";
+	run_after_routines_msg = MSG_OK;
+];
+
+[ CloseSub;
+	"It won't budge!";
+!	if(noun hasnt open) { PrintMsg(MSG_OBJ_NOT_OPEN, noun); rtrue; }
+!	if(noun hasnt openable) return MSG_TELL_ME_HOW;
+!	give noun ~open;
+!!	"You close ", (the) noun, ".";
+!	run_after_routines_msg = MSG_OK;
+];
+
+[ LockSub;
+	"Don't want to lock it.";
+!	if(noun hasnt lockable) return MSG_NOT_LOCKABLE;
+!	if(noun has open) "That's open.";
+!	if(noun has locked) "That's already locked.";
+!	if(second == 0) return MSG_WHICH_KEY;
+!	if(noun.with_key ~= second) return MSG_DOESNT_FIT_LOCK;
+!	give noun locked;
+!	run_after_routines_msg = MSG_OK;
+];
+
+[ UnlockSub _key;
+	if(noun hasnt lockable) return MSG_NOT_LOCKABLE;
+	if(noun hasnt locked) "It's allready unlocked.";
+	if(second == 0) {
+		_key = noun.with_key;
+		if(_key in player)
+			second = _key;
+		else
+			"Don't carry the right key.";
+	}
+	if(second == 0) return MSG_WHICH_KEY;
+	if(ImplicitGrabIfNotHeld(second)) rtrue;
+	if(noun.with_key ~= second) return MSG_DOESNT_FIT_LOCK;
+	give noun ~locked;
+	run_after_routines_msg = MSG_OK;
+];
+
+[ PushSub;
+	if (ObjectIsUntouchable(noun)) return;
+	if(noun has static) return MSG_IS_STATIC;
+	if(noun has scenery || noun == player) return MSG_ABSURD;
+	if(noun has animate) return MSG_NOT_POLITE;
+	return MSG_NOTHING_HAPPENS;
+];
+
+[ PullSub;
+	return PushSub();
+];
+
+[ TurnSub;
+	return PushSub();
+];
+
+[ SwitchOnSub;
+	if(noun hasnt switchable) "Switch on WHAT??";
+	if(noun has on) "It's already on.";
+	give noun on;
+	run_after_routines_msg = "OK";
+];
+
+[ SwitchOffSub;
+	if(noun hasnt switchable) return MSG_NOT_SWITCHABLE;
+	if(noun hasnt on) "That's already off.";
+	give noun ~on;
+	run_after_routines_msg = "I turn it off.";
+];
+
+[ GoSub _val _old_loc;
+	_old_loc = real_location;
+	_val = real_location.direction;
+	if(_val < 2 || _val > top_object)
+		_val = real_location.direction(); ! May be string or routine
+	if(_val == 0)
+		"Can't go that way.";		
+	if(_val > 1 && _val <= top_object) {
+		if(_val has door) {
+			if(_val hasnt open) {
+				print "Do you think I can walk through the ";
+				if(_val provides simple_name)
+					PrintOrRun(_val, simple_name, true);
+				else
+					print "door";
+				"!??";
+!				run_after_routines_msg = MSG_DOOR_CLOSED;
+!				run_after_routines_arg_1 = _val;
+!				rtrue;
+			}
+			if(_val provides door_to) {
+				_val = _val.door_to();
+			} else {
+				if(_val provides found_in && _val.#found_in == 4) {
+					if(real_location == _val.&found_in-->0)
+						_val = _val.&found_in-->1;
+					else
+						_val = _val.&found_in-->0;
+				} else {
+#Iftrue RUNTIME_ERRORS > RTE_MINIMUM;
+					_RunTimeError(ERR_BROKEN_DOOR, _val);
+#Endif;
+				}
+			}
+			
+		}
+		if(_RunFakeAction(_val, ##Going, before)) rtrue;
+		print "OK^";
+		PlayerTo(_val,2);
+		if(_RunFakeAction(_old_loc, ##Going, after)) rtrue;
+		run_after_routines_msg = 1;
+	}
+];
+
+![ ListObjectsRecursively
+
+[ InvSub _any;
+	print "I'm carrying:^";
+	_any = TallPrintContents(player);
+
+!	objectloop(_obj in player) {
+!		_any = 1;
+!		print (name) _obj;
+!		new_line;
+!	}
+	if(_any == 0) print "^NOTHING!!^";
+	run_after_routines_msg = 1;
+];
+
+[ ClimbSub;
+!	if(noun == 0) { PrintMsg(MSG_MISSING_NOUN, "climb"); rtrue; }
+	return "Climb where?";
+];
+
+[ EnterSub _dir;
+	if(noun == 0) { PrintMsg(MSG_MISSING_NOUN, "enter"); rtrue; }
+	if(ObjectIsUntouchable(noun)) rtrue;
+	if(IndirectlyContains(player, noun)) 
+		"Certainly not while I'm holding ", (ItOrThem) noun, ".";  
+	if(player notin real_location) 
+		"I'd have to leave ", (the) parent(player), " first.";
+	if(noun hasnt door or container or supporter) return MSG_FUTILE;
+!	if(noun hasnt open && noun hasnt supporter) { PrintMsg(MSG_OBJ_NOT_OPEN, noun); rtrue; }
+	if(noun hasnt open && noun hasnt supporter)
+		"Do you think I can walk through it!??";
+	if(noun has container or supporter) {
+		if(noun hasnt enterable) return MSG_FUTILE;
+		PlayerTo(noun, true);
+		run_after_routines_msg = MSG_OK;
+	} else if(noun provides door_dir) {
+		if(noun.#door_dir == 4) {
+			if(real_location == noun.&found_in-->0)
+				_dir = noun.&door_dir-->0;
+			else
+				_dir = noun.&door_dir-->1;
+		} else {
+			_dir = RunRoutines(noun, door_dir);
+		}
+!		print "Going direction ", (property) _dir, ".";
+		_dir = DirPropToFakeObj(_dir);
+!		print "OK^";
+		<Go _dir>;
+		run_after_routines_msg = 1;
+	} else {
+#Iftrue RUNTIME_ERRORS > RTE_MINIMUM;
+		_RunTimeError(ERR_BROKEN_DOOR, noun);
+#Endif;
+	}
+];
+
+[ ExitSub _parent;
+	if(noun == 0) {
+		_parent = parent(player);
+		if(_parent ~= real_location)
+			noun = _parent;
+		else { 
+			PrintMsg(MSG_MISSING_NOUN, "leave"); 
+			rtrue;
+		}
+	}
+	if(~~(player in noun))
+		"But I'm not in or on ", (the) noun, ".";
+	if(noun hasnt open && noun has container) { PrintMsg(MSG_OBJ_NOT_OPEN, noun); rtrue; }
+	PlayerTo(real_location, true);
+	run_after_routines_msg = MSG_OK;
+];
+
+![ AskSub;
+!	if(noun hasnt animate) return MSG_ONLY_ANIMATE;
+!	return MSG_NO_REPLY;
+!];
+
+![ TellSub;
+!	return AskSub();
+!];
+
+[ AnswerSub;
+	"Answer WHAT??";
+!	if(noun == 0) "You do, to no one in particular.";
+!	return AskSub();
+];
+
+![ GiveSub;
+!	if(ObjectIsUntouchable(noun)) return;
+!	if(ImplicitGrabIfNotHeld(second)) rtrue;
+!	if (noun == player)  return MSG_OK;
+!	if(BlockIfWorn(second)) rtrue;
+!!	if (RunLife(second, ##Give) ~= 0) rfalse;
+!	return MSG_GIVE_DEFAULT;
+!];
+
+![ ShowSub;
+!	if(ObjectIsUntouchable(noun)) return;
+!	if(ImplicitGrabIfNotHeld(second)) rtrue;
+!!	if (noun == player)  return MSG_OK;
+!!	if (RunLife(second, ##Give) ~= 0) rfalse;
+!	return MSG_NO_REPLY;
+!];
+
+[ AttackSub;
+	if(ImplicitGrabIfNotHeld(second)) rtrue;
+	if (ObjectIsUntouchable(noun)) return;
+!	if (noun has animate && RunLife(noun, ##Attack) ~= 0) rfalse;
+	return MSG_ATTACK_DEFAULT;
+];
+
+[ _GeneralUselessAction;
+	if(second && ImplicitGrabIfNotHeld(second)) rtrue;
+	if (ObjectIsUntouchable(noun)) return;
+	return MSG_ACHEIVE_NOTHING;
+];
+
+[ BurnSub;
+	return _GeneralUselessAction();
+];
+
+[ CutSub;
+	if(second == 0 && TestScope(Knife)) second = Knife;
+	if(second && ImplicitGrabIfNotHeld(second)) rtrue;
+	if (ObjectIsUntouchable(noun)) return;
+	if(second ~= Knife)
+		"Cut with WHAT??";
+	if(second == Knife && Knife hasnt general)
+		"The knife made no impression on it.";
+	return MSG_ACHEIVE_NOTHING;
+];
+
+[ TieSub;
+	if (ObjectIsUntouchable(noun)) rtrue;
+	if (second && ObjectIsUntouchable(second)) rtrue;
+	return MSG_ACHEIVE_NOTHING;
+];
+
+#Ifdef NO_SCORE;
+[ ScoreSub;
+	return MSG_SCORE_DEFAULT;
+];
+#Ifnot;
+#Ifndef PrintRank;
+[ PrintRank; "."; ];
+#Endif;
+[ ScoreSub;
+	PrintMsg(MSG_SCORE_DEFAULT);
+	PrintRank();
+];
+#Endif;
+
+#Ifdef OPTIONAL_FULL_SCORE;
+#Ifdef TASKS_PROVIDED;
+[ Achieved num;
+	if (task_done->num == 0) {
+		task_done->num = 1;
+		score = score + task_scores->num;
+	}
+];
+#Endif;
+[ PANum p_m _n;
+	print "  ";
+	_n = p_m;
+	if(_n < 0)    _n = -10 * p_m;
+	if(_n < 10)   print " ";
+	if(_n < 100)  print " ";
+	if(_n < 1000) print " ";
+._Panuml;
+	print p_m, " ";
+];
+#Endif;
+
+#Ifdef OPTIONAL_FULL_SCORE;
+#Ifdef TASKS_PROVIDED;
+[ FullScoreSub _i _score_sum _sc;
+#Ifnot;
+[ FullScoreSub _i _score_sum;
+#Endif;
+	new_line;
+	PrintMsg(MSG_FULLSCORE_START);
+#Ifdef TASKS_PROVIDED;
+	for(_i=0 : _i<NUMBER_TASKS : _i++)
+		if (task_done->_i == 1) {
+			_sc = task_scores->(_i);
+			PANum(_sc);
+			_score_sum = _score_sum + _sc;
+#Ifdef PrintTaskName;
+			PrintTaskName(_i);
+#Endif;
+		}
+#Ifnot;
+	_i = 0; ! Avoid warning
+#Endif;
+#Ifdef OPTIONAL_SCORED;
+	if(things_score ~= 0) {
+		PANum(things_score);
+		PrintMsg(MSG_FULLSCORE_OBJECTS);
+	}
+	if(places_score ~= 0) {
+		PANum(places_score);
+		PrintMsg(MSG_FULLSCORE_ROOMS);
+	}
+	_score_sum = score - _score_sum - things_score - places_score;
+#Ifnot;
+	_score_sum = score - _score_sum;
+#Endif;
+	if(_score_sum ~= 0) {
+		PANum(_score_sum);
+		PrintMsg(MSG_FULLSCORE_ACTIONS);
+	}
+	new_line;
+	PANum(score);
+	return MSG_FULLSCORE_END;
+];
+#Endif;
+
+[ ImplicitGrabIfNotHeld p_noun _ks;
+	! return true if p_noun isn't held by the player at the end of the call
+	! (so that you can use it like: if(_ImplicitGrabIfNotHeld(...)) { }
+	! Return false if actor isn't player or p_noun is 0
+	@je p_noun 0 ?rfalse;
+	if(p_noun in player) rfalse;
+!	PronounNotice(p_noun);
+	if(no_implicit_actions) { PrintMsg(MSG_NOT_HOLDING, p_noun); rtrue; }
+	PrintMsg(MSG_AUTO_TAKE, p_noun);
+	_ks = keep_silent;
+	keep_silent = true;
+	<Take p_noun>;
+!	PerformAction(##Take, p_noun);
+	keep_silent = _ks;
+	if (p_noun notin player) rtrue;
+	rfalse;
+];
+
+#Ifndef NO_PLACES;
+[ PlacesSub _i;
+	print "I have visited:^";
+	objectloop(_i has visited) {
+		if(parent(_i) == 0 && _RoomLike(_i)) {
+#Ifdef OPTIONAL_DARKNESS;
+			if(_i == thedark) continue;
+#Endif;
+			print "- ", (name) _i; new_line;
+		}
+	}
+];
+
+[ ObjectsSub _i _j _f;
+	print "Objects I have handled: ";
+	objectloop (_i has moved && _ObjectLike(_i)) {
+		_j = parent(_i);
+		if(_f == 0) new_line;
+		_f++;
+		print "- ", (the) _i, "   ";
+		if (_j == player) {
+			if (_i has worn) {
+				print "(worn)";
+			} else {
+				print "(held)";
+			}
+		} else if(_j == 0) print "(lost)";
+		else if(_j has animate) print "(given away)";
+		else if(_j has visited && parent(_j)==0) print "(in ", (name) _j, ")";
+		else if(_j has container) print "(inside ", (the) _j, ")";
+		else if(_j has supporter) print "(on ", (the) _j, ")";
+		else if(_j has enterable) print "(in ", (the) _j, ")";
+		else print "(lost)";
+		new_line;
+	}
+	if(_f == 0) "none.";
+];
+
+Array g_places static table [
+	T_SET_META
+	##Places
+];
+
+Array g_objects static table [
+	T_SET_META
+	##Objects
+];
+
+#Endif; ! NO_PLACES
+
+Array g_quit static table [
+	T_SET_META
+	##Quit
+];
+
+Array g_restart static table [
+	T_SET_META
+	##Restart
+];
+
+Array g_save static table [
+	T_SET_META
+	##Save
+];
+
+Array g_restore static table [
+	T_SET_META
+	##Restore
+];
+
+Array g_wait static table [
+	T_SET_META
+	##Wait
+];
+
+#Ifdef OPTIONAL_LOOKMODE;
+Array g_look static table [
+	##Look
+	##LookMode 'brief'
+	##LookMode 'normal'
+	##LookMode 'superbrief'
+	##LookMode 'short'
+	##LookMode 'verbose'
+	##LookMode 'long'
+	##Examine 'at' T_NOUN
+	##Examine T_NOUN
+];
+#Ifnot;
+Array g_look static table [
+	##Look
+	##Examine 'at' T_NOUN
+	##Examine T_NOUN
+];
+#Endif;
+
+!Array g_take static table [
+!	##Take T_NOUN
+!	##TakeAllBut T_ALL
+!	##TakeAllBut T_ALL T_BUT T_NOUN
+!	##Disrobe 'off' T_NOUN
+!];
+
+Array g_take static table [
+	##Take T_NOUN
+	##Disrobe 'off' T_NOUN
+];
+
+!Array g_get static table [
+!	##Take T_NOUN
+!	##TakeAllBut T_ALL
+!	##TakeAllBut T_ALL T_BUT T_NOUN
+!	##Enter 'on' T_NOUN
+!	##Exit 'off' T_NOUN
+!	##Exit 'out' 'of' T_NOUN
+!];
+
+Array g_get static table [
+	##Take T_NOUN
+	##Enter 'on' T_NOUN
+	##Exit 'off' T_NOUN
+	##Exit 'out' 'of' T_NOUN
+	##Exit 'up'
+];
+
+Array g_exit static table [
+	##Exit
+	##Exit T_NOUN
+];
+
+Array g_wear static table [
+	##Wear T_NOUN
+];
+
+Array g_disrobe static table [
+	##Disrobe T_NOUN
+];
+
+Array g_open static table [
+	##Open T_NOUN
+];
+
+Array g_close static table [
+	##Close T_NOUN
+];
+
+Array g_lock static table [
+	##Lock T_NOUN 'with' T_SECOND
+	##Lock T_NOUN
+];
+
+Array g_unlock static table [
+	##Unlock T_NOUN 'with' T_SECOND
+	##Unlock T_NOUN
+];
+
+Array g_switch static table [
+	##SwitchOn T_NOUN
+	##SwitchOn 'on' T_NOUN
+	##SwitchOn T_NOUN 'on'
+	##SwitchOff 'off' T_NOUN
+	##SwitchOff T_NOUN 'off'
+];
+
+Array g_turn static table [
+	##Turn T_NOUN
+	##SwitchOn 'on' T_NOUN
+	##SwitchOn T_NOUN 'on'
+	##SwitchOff 'off' T_NOUN
+	##SwitchOff T_NOUN 'off'
+];
+
+Array g_push static table [
+	##Push T_NOUN
+];
+
+Array g_pull static table [
+	##Pull T_NOUN
+];
+
+!Array g_drop static table [
+!	##Drop T_NOUN
+!	##DropAllBut T_ALL
+!	##DropAllBut T_ALL T_BUT T_NOUN
+!	##Insert T_NOUN 'in' T_SECOND
+!	##Insert T_NOUN 'into' T_SECOND
+!	##ThrowAt T_NOUN 'at' T_SECOND
+!	##ThrowAt T_NOUN 'onto' T_SECOND
+!];
+
+Array g_drop static table [
+	##Drop T_NOUN
+	##Insert T_NOUN 'in' T_SECOND
+	##Insert T_NOUN 'into' T_SECOND
+	##PutOn T_NOUN 'onto' T_SECOND
+];
+
+Array g_insert static table [
+	##Insert T_NOUN 'in' T_SECOND
+	##Insert T_NOUN 'into' T_SECOND
+];
+
+Array g_put static table [
+	##Insert T_NOUN 'in' T_SECOND
+	##Insert T_NOUN 'into' T_SECOND
+	##PutOn T_NOUN 'on' T_SECOND
+];
+
+Array g_inv static table [
+	##Inv
+];
+
+Array g_examine static table [
+	##Examine T_NOUN
+];
+
+Array g_search static table [
+	##Search T_NOUN
+];
+
+Array g_go static table [
+	##Go T_DIRECTION
+	##Enter T_NOUN
+	##Enter 'in' T_NOUN
+	##Enter 'into' T_NOUN
+];
+
+Array g_enter static table [
+	##Enter
+	##Enter T_NOUN
+];
+
+Array g_climb static table [
+	##Climb T_NOUN
+	##Climb
+];
+
+!Array g_ask static table [
+!	##Ask T_NOUN 'about' T_TOPIC
+!];
+
+!Array g_tell static table [
+!	##Tell T_NOUN 'about' T_TOPIC
+!];
+
+Array g_answer static table [
+	##Answer T_NOUN
+];
+
+!Array g_give static table [
+!	##Give T_SECOND 'to' T_NOUN
+!	##Give T_NOUN T_SECOND
+!];
+
+!Array g_show static table [
+!	##Show T_SECOND 'to' T_NOUN
+!	##Show T_NOUN T_SECOND
+!];
+
+Array g_attack static table [
+	##Attack T_NOUN
+	##Attack T_NOUN 'with' T_SECOND
+];
+
+Array g_burn static table [
+	##Burn T_NOUN
+	##Burn T_NOUN 'with' T_SECOND
+];
+
+Array g_cut static table [
+	##Cut T_NOUN
+	##Cut T_NOUN 'with' T_SECOND
+!	##Attack T_NOUN 'with' T_SECOND
+];
+
+Array g_tie static table [
+	##Tie T_NOUN
+	##Tie T_NOUN 'to' T_SECOND
+];
+
+! ########## Custom actions
+
+Array g_light static table [
+	##SwitchOn T_NOUN
+];
+
+[ InhaleSub;
+	"The only thing I can inhale here is air. 
+		And what are you think I'm doing right now?";
+];
+
+Array g_inhale static table [
+	##Inhale
+	##Inhale T_NOUN
+	##Inhale 'in' T_NOUN
+];
+
+[ ThrowSub;
+	if(second == 0) {
+		if(TestScope(Madman)) second = Madman;
+		else "Throw at WHAT??";
+	}
+	if(ImplicitGrabIfNotHeld(noun)) rtrue;
+	if(BlockIfWorn(noun)) rtrue;
+	if(_RunFakeAction(second, ##ThrownAt, before)) rtrue;
+	keep_silent = true;
+	<Drop noun>;
+	keep_silent = false;
+!	if(noun in real_location)
+	run_after_routines_msg = "I missed.";
+];
+
+Array g_throw static table [
+	##Throw T_NOUN
+	##Throw T_NOUN 'at' T_SECOND
+];
+
+[ SaySub _start _end _endword _i _char;
+	if(consult_words == 0)
+		"I'm speechless!";
+	_start = WordAddress(consult_from);
+	_endword = consult_from + consult_words - 1;
+	_end = WordAddress(_endword) + WordLength(_endword) - 1;
+	for(_i = _start: _i <= _end: _i++) {
+		_char = _i->0;
+		if(_char > 96 && _char < 123) _char = _char - 32;
+		print (char) _char;
+	}
+	print "!^";
+	run_after_routines_msg = "Nothing happened.";
+];
+
+Array g_say static table [
+	##Say
+	##Say T_TOPIC
+];
+
+[ UseSub;
+	"Express it in another way.";
+];
+
+Array g_use static table [
+	##Use T_NOUN
+];
+
+[ BuySub;
+	if(noun == 0)
+		"Buy WHAT??";
+	"Don't want to buy that.";
+];
+
+Array g_buy static table [
+	##Buy
+	##Buy T_NOUN
+];
+
+[ SitSub;
+	"No thanks!";
+];
+
+Array g_sit static table [
+	##Sit
+	##Sit T_NOUN
+	##Sit 'in' T_NOUN
+	##Sit 'on' T_NOUN
+];
+
+[ DrinkSub;
+	"Drink WHAT??";
+];
+
+Array g_drink static table [
+	##Drink T_NOUN
+];
+
+[ KickSub;
+	"AOW! That hurts.";
+];
+
+Array g_kick static table [
+	##Kick T_NOUN
+];
+
+[ HitSub;
+	"AOW! That hurts.";
+];
+
+Array g_hit static table [
+	##Hit T_NOUN
+];
+
+[ ListenSub;
+	"On WHAT??";
+];
+
+Array g_listen static table [
+	##Listen
+	##Listen T_NOUN
+	##Listen 'to' T_NOUN
+	##Listen 'on' T_NOUN
+];
+
+[ ShootSub;
+	if(Gun notin player) {
+		PrintMsg(MSG_CANT_DO_THAT_YET);
+		rfalse;
+	}
+	if(Gun.bullets < 1) "CLICK!";
+	print "BANG!^";
+	Gun.bullets--;
+	run_after_routines_msg = "Strange...the bullet VANISHES!";	
+	if(noun && noun provides get_shot_at) {
+		if(RunRoutines(noun, get_shot_at))
+			run_after_routines_msg = 0;
+	}
+];
+
+Array g_shoot static table [
+	##Shoot
+	##Shoot T_NOUN
+	##Shoot 'at' T_NOUN
+];
+
+[ LoadSub;
+	if(noun ~= Gun)
+		"Load WHAT??";
+	if(Gun notin player || Ammunition notin player) {
+		PrintMsg(MSG_CANT_DO_THAT_YET);
+		rfalse;
+	}
+	Gun.bullets = Ammunition.bullets;
+	remove Ammunition;
+	scope_modified = true;
+	run_after_routines_msg = MSG_OK;
+];
+
+Array g_load static table [
+	##Restore
+	##Load T_NOUN
+];
+
+[ SharpenSub;
+	if(noun ~= Knife)
+		"Sharpen WHAT??";
+	if(second ~= 0 or Stone)
+		"Use WHAT to sharpen??";
+	if(Knife notin player || Knife has general || Stone notin player) {
+		PrintMsg(MSG_CANT_DO_THAT_YET);
+		rfalse;
+	}
+	Knife.make_sharp();
+	run_after_routines_msg = MSG_OK;
+];
+
+Array g_sharpen static table [
+	##Sharpen
+	##Sharpen T_NOUN
+	##Sharpen T_NOUN 'with' T_SECOND
+];
+
+[ StabSub;
+	if(noun == 0) "Stab WHAT??";
+	if(second ~= 0 or Knife) "Use WHAT to stab??";
+	if(Knife notin player) "I don't have a knife.";
+	"Stab WHAT??";
+];
+
+Array g_stab static table [
+	##Stab
+	##Stab T_NOUN
+	##Stab T_NOUN 'with' T_SECOND
+];
+
+[ ReadSub;
+#Ifdef OPTIONAL_DARKNESS;
+	if(location == thedark) return MSG_ITS_DARK;
+#Endif;
+	if(noun.&read_description == 0 || noun.read_description == 0 or NULL)
+		"Read WHAT??";
+	else
+		RunRoutines(noun, read_description);
+	run_after_routines_msg = 1;
+];
+
+Array g_read static table [
+	##Read
+	##Read T_NOUN
+];
+
+[ JumpSub;
+	if(noun) "Jump to WHAT??";
+	"OK";
+];
+
+Array g_jump static table [
+	##Jump
+	##Jump T_NOUN
+	##Jump 'to' T_NOUN
+	##Jump 'onto' T_NOUN
+];
+
+[ CurseSub;
+	"No dirty talk!";
+];
+
+Array g_curse static table [
+	##Curse
+	##Curse T_TOPIC
+];
+
+[ HelpSub;
+	help_count++;
+	if(help_count > 4) {
+		help_count = 0;
+		"I'm sick and tired of your HELP asking.";
+	}
+	if(real_location == Sauna)
+		"Examine the door.";
+	if(real_location == OutsideWarehouse)
+		"Check out the roof.";
+	if(faint)
+		"Think on the ad-sign.";
+	switch(real_location) {
+		EndOfHall:
+			"You'll need to say a magic word here...";
+		Room4:
+			"Try to get lighter by.... Yes what??";
+		Room:
+			"I'm good at carate.";
+	}
+	"Try 'GET INHALE WEAR MOVE SAY GO' or other verbs you can think of";
+];
+
+Array g_help static table [
+	T_SET_META
+	##Help
+];
+
+[ AboutSub;
+	"This game was written by Ove Friman, in Basic, for VIC-20. 
+		Fredrik Ramsberg ported it to Inform 6 + NAIL in 2026.
+		^^Latest version can be found at https://github.com/fredrikr/madman";
+];
+
+Array g_about static table [
+	T_SET_META
+	##About
+];
+
+[ BreakSub;
+	if(noun == 0) "Break WHAT??";
+	if(ImplicitGrabIfNotHeld(second)) rtrue;
+	if(ObjectIsUntouchable(noun)) return;
+	if(noun provides break_it && RunRoutines(noun, break_it)) rtrue;
+	return "Don't want to destroy it.";
+];
+
+Array g_break static table [
+	##Break
+	##Break T_NOUN
+	##Break T_NOUN 'with' T_SECOND
+];
+
+[ EatSub;
+	if(noun == 0) "Eat WHAT??";
+	if(ImplicitGrabIfNotHeld(noun)) rtrue;
+	return "Don't want to eat that!";
+];
+
+Array g_eat static table [
+	##Eat
+	##Eat T_NOUN
+];
+
+! ########## END Custom actions
+
+Array g_score static table [
+	##Score
+];
+
+#Ifdef OPTIONAL_FULL_SCORE;
+Array g_fullscore static table [
+	##FullScore
+	##FullScore 'score'
+];
+#Endif;
+
+#Ifdef OPTIONAL_SCRIPT;
+
+Global transcript_mode = false;        ! true when game scripting is on
+Global xcommsdir = false;              ! true if command recording is on
+
+[ ScriptOnSub;
+	transcript_mode = (HDR_GAMEFLAGS-->0) & 1;
+	if (transcript_mode) "Transcripting is already on.";
+	@output_stream 2;
+	if (((HDR_GAMEFLAGS-->0) & 1) == 0) "Attempt to begin transcript failed.";
+	print "Start of a transcript of^";
+	Banner();
+	transcript_mode = true;
+];
+
+[ ScriptOffSub;
+	transcript_mode = ((HDR_GAMEFLAGS-->0) & 1);
+	if (transcript_mode == false) "Transcripting is already off.";
+	print "^End of transcript.^";
+	@output_stream -2;
+	if ((HDR_GAMEFLAGS-->0) & 1) "Attempt to end transcript failed.";
+	transcript_mode = false;
+];
+
+[ CommandsOnSub;
+	@output_stream 4;
+	xcommsdir = 1;
+	"[Command recording on.]";
+];
+
+[ CommandsOffSub;
+	if (xcommsdir == 1) @output_stream -4;
+	xcommsdir = 0;
+	"[Command recording off.]";
+];
+
+[ CommandsReadSub;
+	@input_stream 1;
+	xcommsdir = 2;
+	"[Replaying commands.]";
+];
+
+Array g_noscript static table [
+	T_SET_META
+	##ScriptOff
+];
+
+Array g_script static table [
+	T_SET_META
+	##ScriptOn
+	##ScriptOn 'on'
+	##ScriptOff 'off'
+];
+
+Array g_recording static table [
+	T_SET_META
+	##CommandsOn
+	##CommandsOn 'on'
+	##CommandsOff 'off'
+];
+
+Array g_replay static table [
+	T_SET_META
+	##CommandsRead
+];
+
+#Endif;
+
+
+#Ifdef DEBUG;
+
+Global scope_cnt;
+
+[ _ScopeSubHelper p_obj;
+	print scope_cnt++,": ", (a) p_obj, " (", p_obj, ")";
+	if(ObjectIsUntouchable(p_obj, true)) print " [untouchable]";
+	new_line;
+];
+
+[ ScopeSub;
+	scope_cnt = 1;
+	LoopOverScope(_ScopeSubHelper, noun);
+	if(scope_cnt < 2) "Nothing in scope.^";
+];
+
+[ PurloinSub;
+	if(noun == player || IndirectlyContains(noun, player)) return MSG_ABSURD;
+
+	move noun to player;
+	scope_modified = true;
+	update_moved = true;
+	"Purloined ", (the) noun, ".";
+];
+
+[ GoNearSub _obj _p;
+	_obj = noun;
+	while((_p = parent(_obj)) ~= 0) _obj = _p;
+	if(_obj == noun) print_ret (The) noun, " is not in anything!";
+	PlayerTo(_obj);
+];
+
+[ _TreeSubHelper p_parent p_indent _x _i;
+	objectloop(_x in p_parent) {
+		for(_i = 0 : _i < p_indent : _i++) print "  ";
+		print (a) _x, " (", _x, ")^";
+		if(child(_x)) _TreeSubHelper(_x, p_indent + 1);
+	}
+];
+
+Constant _REAL_LOCATION_TEXT " *** real_location ***";
+
+[ TreeSub p_real_location _p _num;
+	if(noun == 0) {
+		if(consult_from) {
+			_num = TryNumber(consult_from);
+			if(_num > 4 && _num <= top_object)
+				noun = _num;
+			else
+				"That doesn't seem to be an object.";
+		} else
+			noun = real_location;
+	}
+
+	if(noun in nothing)
+		print (name) noun;
+	else
+		print (a) noun;
+	print " (", noun, ")";
+	_p = parent(noun);
+	if(_p) {
+		if(_p has supporter)
+			print " on";
+		else
+			print " in";
+		print " ~", (name) _p, "~ (", _p, ")";
+	}
+	if(noun == p_real_location) {
+#Iftrue #version_number > 3;
+		style bold;
+#Endif;
+		print (string) _REAL_LOCATION_TEXT;
+#Iftrue #version_number > 3;
+		style roman;
+#Endif;
+	}
+	new_line;
+	_TreeSubHelper(noun, 1);
+];
+
+[ ForestSub;
+	for(noun=5 : noun<= top_object: noun++)
+		if(noun in nothing)
+			TreeSub(real_location);
+];
+
+[ _GotoRoomsHelper p_return_first _obj _first _i _j _k _m _n _t _count 
+		_first_typed_char _first_typed_char_upcase _last_start_pos;
+	! p_return_first = true: return the first matching room
+	! p_return_first = false: print all matching rooms
+	_t = _GotoSubBuffer + 2;
+	if(consult_from) {
+		_first = WordAddress(consult_from);
+		if(_first->0 == '*') _first++; ! Ignore '*' at start of search string
+		_i = consult_from + consult_words - 1;
+		_count = WordAddress(_i) + WordLength(_i) - _first;
+		if(_first->(_count-1) == '*') _count--;  ! Ignore '*' at end of search string
+		_first_typed_char = _first->0;
+		_first_typed_char_upcase = _first_typed_char;
+		if(_first_typed_char_upcase < 123 && _first_typed_char_upcase > 96) {
+			_first_typed_char_upcase = _first_typed_char_upcase - 32;
+		}
+		
+	}
+	_obj=5;
+!	for(_obj=Directions + 1 : _obj<= top_object: _obj++)
+._check_next_obj;
+		if(_RoomLike(_obj)) {
+
+			if(_count > 0) {
+				@output_stream 3 _GotoSubBuffer;
+				print (name) _obj;
+				@output_stream -3;
+				_k = _GotoSubBuffer-->0;
+#IfTrue RUNTIME_ERRORS > RTE_MINIMUM;
+				if(_k > GOTOSUB_BUFFER_SIZE) {
+					_RunTimeError(ERR_BUFFER_OVERRUN, _obj);
+					rtrue;
+				}
+#Endif;
+				_last_start_pos = _k - _count;
+
+				! Check if search string is part of room name
+				_j = 0;
+				!for(_j=0:_j<=_last_start_pos:_j++) {
+._match_loop;
+					if(_t->_j == _first_typed_char or _first_typed_char_upcase) {
+						! Found a match for first character
+						if(_count == 1) jump _found_match;
+						_m = _count - 1;
+						_i = 1;
+						_n = _j + 1;
+!							for(_i=1,_n=_j+1:_i<_count:_i++,_n++) {
+._match_next_char;
+							_k = _t->_n;
+							if(_k < 91 && _k > 64)
+								_k = _k + 32;
+							if(_k ~= _first->_i) {
+								jump _leave_inner_match_loop;
+							}
+							_n++;
+							@inc_chk _i _m ?~_match_next_char;
+!							}
+						jump _found_match;
+._leave_inner_match_loop;
+					}
+					@inc_chk _j _last_start_pos ?~_match_loop;
+!				}
+				jump _end_of_obj_loop;
+			} 
+._found_match;		
+			if(p_return_first)
+				return _obj;
+			print (name) _obj, " (", _obj, ")";
+			if(_obj == real_location) {
+#Iftrue #version_number > 3;
+				style bold;
+#Endif;
+				print (string) _REAL_LOCATION_TEXT;
+#Iftrue #version_number > 3;
+				style roman;
+#Endif;
+			}
+			new_line;
+		}
+._end_of_obj_loop;
+		@inc_chk _obj top_object ?~_check_next_obj;
+	return false;
+];
+
+Default GOTOSUB_BUFFER_SIZE 80;
+
+Array _GotoSubBuffer --> (1 + (GOTOSUB_BUFFER_SIZE + 1)/2); ! Add an extra word of constant has odd value
+
+[ GotoSub _obj;
+	if(consult_words == 1) {
+		_obj = TryNumber(consult_from);
+		if(_obj > 0) {
+			if(_RoomLike(_obj))
+				jump _gotoObj;
+			jump _not_a_room;
+		}
+	}
+	_obj = _GotoRoomsHelper(true);
+	if(_obj == 0)
+		jump _not_a_room;
+._gotoObj;
+	PlayerTo(_obj);
+	rtrue;
+._not_a_room;
+	"That doesn't seem to be a room.";
+];
+
+[ RoomsSub;
+	_GotoRoomsHelper();
+];
+
+[ ActionsOnSub;   debug_flag = debug_flag | 2;  "[Action listing on.]"; ];
+
+[ ActionsOffSub;  debug_flag = debug_flag & 13; "[Action listing off.]"; ];
+
+[ RoutinesOnSub;  debug_flag = debug_flag | 1;  "[Message listing on.]"; ];
+
+[ RoutinesOffSub; debug_flag = debug_flag & 14; "[Message listing off.]"; ];
+
+[ TimersOnSub;    debug_flag = debug_flag | 4;  "[Timers listing on.]"; ];
+
+[ TimersOffSub;   debug_flag = debug_flag & 11; "[Timers listing off.]"; ];
+
+Array g_scope static table [
+	T_SET_META
+	##Scope
+];
+
+Array g_purloin static table [
+	T_SET_META
+	##Purloin T_NOUN
+];
+
+Array g_gonear static table [
+	T_SET_META
+	##GoNear T_NOUN
+];
+
+Array g_tree static table [
+	T_SET_META
+	##Tree T_NOUN
+	##Tree T_TOPIC
+	##Tree
+];
+
+Array g_forest static table [
+	T_SET_META
+	##Forest
+];
+
+Array g_goto static table [
+	T_SET_META
+	##Goto T_TOPIC
+];
+
+Array g_rooms static table [
+	T_SET_META
+	##Rooms
+	##Rooms T_TOPIC
+];
+
+Array g_actions static table [
+	T_SET_META
+	##ActionsOn
+	##ActionsOn 'on'
+	##ActionsOff 'off'
+];
+
+Array g_routines static table [
+	T_SET_META
+	##RoutinesOn
+	##RoutinesOn 'on'
+	##RoutinesOff 'off'
+];
+
+Array g_timers static table [
+	T_SET_META
+	##TimersOn
+	##TimersOn 'on'
+	##TimersOff 'off'
+];
+
+#Endif;
+
+! ####################################
+! Verb grammar tables
+! ####################################
+
+! Note: if your game uses about 100+ bytes of array space in dynamic memory,
+! the arrays below can be moved to static memory. They have to stay together,
+! so either move all of them, or none of them.
+! This has to do with https://intfiction.org/t/squashed-globals-in-z-code/72785
+
+Array verb_grammar -->
+	'inventory'    g_inv
+	'i//'          g_inv
+	'go'           g_go
+	'take'         g_take
+	'get'          g_get
+	'open'         g_open
+	'close'        g_close
+	'lock'         g_lock
+	'unlock'       g_unlock
+	'drop'         g_drop
+	'throw'        g_throw
+	'insert'       g_insert
+	'put'          g_put
+	'push'         g_push
+	'press'        g_push
+	'pull'         g_pull
+	'examine'      g_examine
+	'x//'          g_examine
+	'read'         g_read
+	'search'       g_search
+	'climb'        g_climb
+	'look'         g_look
+	'l//'          g_look
+	'switch'       g_switch
+	'wear'         g_wear
+	'disrobe'      g_disrobe
+	'turn'         g_turn
+	'enter'        g_enter
+	'exit'         g_exit
+	'leave'        g_exit
+!	'ask'          g_ask
+!	'tell'         g_tell
+	'answer'       g_answer
+	'say'          g_say
+!	'give'         g_give
+!	'show'         g_show
+	'burn'         g_burn
+	'light'        g_light
+	'cut'          g_cut
+	'tie'          g_tie
+	'attach'       g_tie
+	'fasten'       g_tie
+	'attack'       g_attack
+	'kill'         g_attack
+	'answer'       g_answer
+
+	'inhale'       g_inhale
+	'breathe'      g_inhale
+	'kick'         g_kick
+	'hit'          g_hit
+	'move'         g_push
+	'use'          g_use
+	'buy'          g_buy
+	'sit'          g_sit
+	'drink'        g_drink
+	'listen'       g_listen
+	'shoot'        g_shoot
+	'fire'         g_shoot
+	'load'         g_load
+	'sharpen'      g_sharpen
+	'stab'         g_stab
+	'jump'         g_jump
+	'shit'         g_curse
+	'fuck'         g_curse
+	'help'         g_help
+	'break'        g_break
+	'smash'        g_break
+	'destroy'      g_break
+	'eat'          g_eat
+	'about'        g_about
+	'wait'         g_wait
+	'score'        g_score
+	'z//'          g_wait
+	'save'         g_save
+	'restore'      g_restore
+	'restart'      g_restart
+	'quit'         g_quit
+	'q//'          g_quit;
+	
+#Ifdef OPTIONAL_FULL_SCORE;
+Array _full_score_grammar -->
+	'full'         g_fullscore
+	'fullscore'    g_fullscore;
+#Endif;
+
+#Ifndef NO_PLACES;
+Array _places_grammar -->
+	'places'       g_places
+	'objects'      g_objects;
+#Endif;
+
+#Ifdef OPTIONAL_SCRIPT;
+Array _script_grammar -->
+	'script'       g_script
+	'transcript'  g_script
+	'noscript'     g_noscript
+	'unscript'     g_noscript
+	'recording'    g_recording
+	'replay'       g_replay;
+#Endif;
+
+#Ifdef DEBUG;
+Array _debug_grammar -->
+	'scope'        g_scope
+	'purloin'      g_purloin
+	'gonear'       g_gonear
+	'tree'         g_tree
+	'forest'       g_forest
+	'goto'         g_goto
+	'rooms'        g_rooms
+	'actions'      g_actions
+	'routines'     g_routines
+	'timers'       g_timers
+	'daemons'      g_timers
+;
+#Endif;
+
+Array _verb_grammar_end -->
+	0 0; ! This marks the end of the table
+
+! ####################################
+!  Messages
+! ####################################
+
+Constant MSG_DONT_UNDERSTAND 10;
+Constant MSG_PROMPT 11;
+Constant MSG_OK 100;
+Constant MSG_DOOR_CLOSED 101;
+Constant MSG_TAKE_BELONGS 102;
+Constant MSG_TAKE_PART_OF 103;
+Constant MSG_OBJ_NOT_OPEN 104;
+Constant MSG_NOT_HOLDING 105;
+Constant MSG_ARE_YOU_SURE 106;
+Constant MSG_YES_OR_NO 107;
+Constant MSG_MISSING_NOUN 108;
+Constant MSG_EXIT 109;
+Constant MSG_AUTO_TAKE 110;
+#Ifndef NO_SCORE;
+Constant MSG_PARSER_NEW_SCORE 111;
+#Endif;
+Constant MSG_SCORE_DEFAULT 112;
+#Ifdef OPTIONAL_FULL_SCORE;
+Constant MSG_FULLSCORE_START 113;
+Constant MSG_FULLSCORE_END 114;
+#Endif;
+Constant MSG_YOU_HAVE_WON 115;
+Constant MSG_YOU_HAVE_DIED 116;
+Constant MSG_RESTART_RESTORE_OR_QUIT 117;
+Constant MSG_UNKNOWN_VERB 118;
+Constant MSG_EXAMINE_NOTHING_SPECIAL 119;
+
+Constant MSG_CANT_DO_THAT_YET "Can't do that... YET!";
+Constant MSG_NO_MATCHING_OBJECT "I can't see what you're referring to.";
+Constant MSG_BE_MORE_SPECIFIC "You have to be more specific.";
+Constant MSG_FAILED "Failed.";
+Constant MSG_ABSURD "That's absurd!";
+Constant MSG_FUTILE "That seems futile.";
+Constant MSG_NOT_POLITE "That wouldn't be very polite.";
+!Constant MSG_UNKNOWN_VERB "I don't know that verb.";
+Constant MSG_NO_TOPIC "That sentence seems to lack a clear topic.";
+Constant MSG_IS_STATIC "It's fixed in place.";
+Constant MSG_NOTHING_HAPPENS "Nothing happens.";
+Constant MSG_NOT_SWITCHABLE "That's not something you can switch.";
+Constant MSG_NOT_LOCKABLE "Unlock WHAT??";
+!Constant MSG_TELL_ME_HOW "You'd have to tell me how to do that.";
+Constant MSG_DOESNT_FIT_LOCK "That doesn't fit the lock.";
+Constant MSG_WHICH_KEY "You'd need to tell me which key to use.";
+Constant MSG_TAKE_NOT_AVAILABLE "That's not available.";
+!Constant MSG_ONLY_ANIMATE "You can only do that to something animate.";
+!Constant MSG_NO_REPLY "There is no reply.";
+!Constant MSG_GIVE_DEFAULT "My offer is quietly ignored.";
+Constant MSG_ATTACK_DEFAULT "Violence isn't the answer here.";
+Constant MSG_ACHEIVE_NOTHING "I would achieve nothing by this.";
+#Ifdef OPTIONAL_DARKNESS;
+Constant MSG_NOW_DARK "It's now completely dark.";
+Constant MSG_ITS_DARK "But it's dark.";
+#Endif;
+
+#Ifdef OPTIONAL_FULL_SCORE;
+#Ifdef OPTIONAL_SCORED;
+#Ifndef MSG_FULLSCORE_OBJECTS;
+Constant MSG_FULLSCORE_OBJECTS "finding sundry items";
+#Endif;
+#Ifndef MSG_FULLSCORE_ROOMS;
+Constant MSG_FULLSCORE_ROOMS "visiting various places";
+#Endif;
+#Endif;
+#Ifndef MSG_FULLSCORE_ACTIONS;
+Constant MSG_FULLSCORE_ACTIONS "performing noteworthy actions";
+#Endif;
+#Endif;
+
+[ _PrintMsg p_msg p_arg_1 p_arg_2;
+	if(IsAString(p_msg))
+		print_ret (string) p_msg;
+	switch(p_msg) {
+	MSG_UNKNOWN_VERB:
+		print "Don't know how to '";
+		for(p_arg_1=0: p_arg_1 < parse->4: p_arg_1++)
+			print (char) buffer->((parse->5) + p_arg_1);
+		"' something.";	
+	MSG_DONT_UNDERSTAND:
+		"I didn't understand that sentence.";
+	MSG_PROMPT: 
+		print "^What shall I do now^? "; rtrue;
+	MSG_OK: 
+		"OK";
+	MSG_EXAMINE_NOTHING_SPECIAL:
+		"I find nothing special about ", (ItOrThem) p_arg_1, ".";
+	MSG_AUTO_TAKE:
+		"(first taking ", (the) p_arg_1, ")";
+	MSG_NOT_HOLDING:
+		"Don't carrying it.";
+!		"You're not holding ", (the) p_arg_1, ".";
+	MSG_DOOR_CLOSED:
+		"Do you think I can walk through the door!??";
+!		"Do you think I can walk through ", (the) p_arg_1, "!??";
+	MSG_TAKE_BELONGS:
+		! p_arg_1 = the object that is held by p_arg_2
+		"That seems to belong to ", (the) p_arg_2, ".";
+	MSG_TAKE_PART_OF:
+		! p_arg_1 = the object that is part of p_arg_2
+		"That seems to be part of ", (the) p_arg_2, ".";
+	MSG_OBJ_NOT_OPEN:
+	! p_arg_1 = the object which isn't open.
+		print_ret (CObjIs) p_arg_1, "n't open.";
+	MSG_MISSING_NOUN:
+		"You mean ~",(string) p_arg_1," *something*~?";
+	MSG_EXIT:
+		"I'd need to leave ",(the) p_arg_1," first.";
+#Ifndef NO_SCORE;
+	MSG_PARSER_NEW_SCORE:
+		! p_arg_1 = the old score
+		print "^[The score has just gone ";
+		if(p_arg_1 < score) {
+			p_arg_2 = score - p_arg_1;
+			print "up";
+		} else {
+			p_arg_2 = p_arg_1 - score;
+			print "down";
+		}
+		print " by ", p_arg_2, " point";
+		if(p_arg_2 > 1) print "s";
+		".]";
+#Endif;
+	MSG_SCORE_DEFAULT:
+#Ifdef NO_SCORE;
+		"There is no score in this game.";
+#Ifnot;
+		if (deadflag) print "In that game you"; else print "You have so far";
+		print " scored ", score, " out of a possible ", MAX_SCORE, ", in ", turns, " turn";
+		if(turns ~= 1) print "s";
+		rtrue;
+#Endif;
+#IfDef OPTIONAL_FULL_SCORE;
+	MSG_FULLSCORE_START:
+		print "The score ";
+		if(deadflag) print "wa"; else print "i";
+		"s made up as follows:";
+	MSG_FULLSCORE_END:
+		"total (out of ", MAX_SCORE, ")";
+#EndIf;
+	MSG_ARE_YOU_SURE:
+		print "Are you sure? "; rtrue;
+	MSG_YES_OR_NO:
+		print "Please answer yes or no: "; rtrue;
+	MSG_YOU_HAVE_WON, MSG_YOU_HAVE_DIED: ! print and rtrue to avoid newline
+		print "ADVENTURE IS OVER!";
+ 		rtrue;
+	MSG_RESTART_RESTORE_OR_QUIT:
+		print "^Would you like to RESTART, RESTORE";
+#IfDef OPTIONAL_FULL_SCORE;
+		print ", give the FULL score for that game";
+#EndIf;
+#Ifdef AMUSING_PROVIDED;
+		if(deadflag == GS_WIN) print ", see some suggestions for AMUSING things to do";
+#Endif;
+		print " or QUIT? ";
+		rtrue;
+	}
+#Iftrue RUNTIME_ERRORS > RTE_MINIMUM;
+	_RunTimeError(ERR_UNKNOWN_MSG);
+	print "Value: ", p_msg;
+#Endif;
+];
