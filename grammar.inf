@@ -250,7 +250,6 @@ Array dir_names -->
 		"I'm not the Superman. Can't carry anymore.";
 
 	_parent = parent(noun);
-	if(_parent has animate)
 		
 	if(_parent && _parent has container or supporter)
 		_container_or_supporter = true;
@@ -428,7 +427,7 @@ Array dir_names -->
 	if(noun hasnt locked) "It's allready unlocked.";
 	if(second == 0) {
 		_key = noun.with_key;
-		if(_key in player)
+		if(_key && _key in player)
 			second = _key;
 		else
 			"Don't carry the right key.";
@@ -620,6 +619,7 @@ Array dir_names -->
 !];
 
 [ AttackSub;
+	if(noun hasnt animate) <<Break noun second>>;
 	if(ImplicitGrabIfNotHeld(second)) rtrue;
 	if (ObjectIsUntouchable(noun)) return;
 !	if (noun has animate && RunLife(noun, ##Attack) ~= 0) rfalse;
@@ -835,12 +835,14 @@ Array g_look static table [
 	##LookMode 'verbose'
 	##LookMode 'long'
 	##Examine 'at' T_NOUN
+	##LookUnder 'under' T_NOUN
 	##Examine T_NOUN
 ];
 #Ifnot;
 Array g_look static table [
 	##Look
 	##Examine 'at' T_NOUN
+	##LookUnder 'under' T_NOUN
 	##Examine T_NOUN
 ];
 #Endif;
@@ -1031,6 +1033,10 @@ Array g_tie static table [
 
 ! ########## Custom actions
 
+Array g_pick static table [
+	##Take 'up' T_NOUN
+];
+
 Array g_light static table [
 	##SwitchOn T_NOUN
 ];
@@ -1124,6 +1130,10 @@ Array g_drink static table [
 	##Drink T_NOUN
 ];
 
+[ LookUnderSub;
+	"You find nothing special.";
+];
+
 [ KickSub;
 	"AOW! That hurts.";
 ];
@@ -1138,6 +1148,10 @@ Array g_kick static table [
 
 Array g_hit static table [
 	##Hit T_NOUN
+];
+
+Array g_extinguish static table [
+	##SwitchOff T_NOUN
 ];
 
 [ ListenSub;
@@ -1175,10 +1189,12 @@ Array g_shoot static table [
 [ LoadSub;
 	if(noun ~= Gun)
 		"Load WHAT??";
-	if(Gun notin player || Ammunition notin player) {
+	if(TestScope(Ammunition) == false) {
 		PrintMsg(MSG_CANT_DO_THAT_YET);
 		rfalse;
 	}
+	if(ImplicitGrabIfNotHeld(noun)) rtrue;
+	if(ImplicitGrabIfNotHeld(Ammunition)) rtrue;
 	Gun.bullets = Ammunition.bullets;
 	remove Ammunition;
 	scope_modified = true;
@@ -1288,9 +1304,11 @@ Array g_help static table [
 ];
 
 [ AboutSub;
-	"This game was written by Ove Friman, in Basic, for VIC-20. 
-		Fredrik Ramsberg ported it to Inform 6 + NAIL in 2026.
-		^^Latest version can be found at https://github.com/fredrikr/madman";
+	"This game was written by Ove Friman, in Basic, for VIC-20, probably in 1983. 
+		Fredrik Ramsberg ported it to Inform 6 + NAIL in 2026. The original texts,
+		with the occasional errors in spelling, grammar and punctuation, have been
+		kept intact as far as possible, for nostalgic reasons.
+		^^The latest version can be found at https://github.com/fredrikr/madman";
 ];
 
 Array g_about static table [
@@ -1731,6 +1749,7 @@ Array verb_grammar -->
 	'kill'         g_attack
 	'answer'       g_answer
 
+	'pick'         g_pick
 	'inhale'       g_inhale
 	'breathe'      g_inhale
 	'kick'         g_kick
@@ -1738,6 +1757,7 @@ Array verb_grammar -->
 	'move'         g_push
 	'use'          g_use
 	'buy'          g_buy
+	'purchase'     g_buy
 	'sit'          g_sit
 	'drink'        g_drink
 	'listen'       g_listen
@@ -1754,6 +1774,8 @@ Array verb_grammar -->
 	'smash'        g_break
 	'destroy'      g_break
 	'eat'          g_eat
+	'swallow'      g_eat
+	'extinguish'   g_extinguish
 	'about'        g_about
 	'wait'         g_wait
 	'score'        g_score
@@ -1836,6 +1858,7 @@ Constant MSG_RESTART_RESTORE_OR_QUIT 117;
 Constant MSG_UNKNOWN_VERB 118;
 Constant MSG_EXAMINE_NOTHING_SPECIAL 119;
 
+Constant MSG_COMMENT_ACCEPTED "[Comment accepted]";
 Constant MSG_CANT_DO_THAT_YET "Can't do that... YET!";
 Constant MSG_NO_MATCHING_OBJECT "I can't see what you're referring to.";
 Constant MSG_BE_MORE_SPECIFIC "You have to be more specific.";

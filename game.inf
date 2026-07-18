@@ -20,12 +20,11 @@ Constant Headline   "^An interactive race against the clock^^
 Constant NO_PLACES;
 
 Release 0;
-Serial "260714";
+Serial "260718";
 
 ! Get your own unique IFID for your game at https://www.tads.org/ifidgen/ifidgen
 Array UUID_ARRAY string "UUID://F5627028-7964-4D05-A2A6-91BBDC351615//"; 
 #Ifdef UUID_ARRAY; #Endif;
-
 
 Constant OPTIONAL_DARKNESS;
 !Constant OPTIONAL_LOOKMODE;
@@ -49,7 +48,10 @@ Constant STATUSLINE_SCORE; Statusline score;
 
 Constant INITIAL_LOCATION_VALUE = Bedroom;
 
-Constant GamePreRoutine = _GamePreRoutine;
+!Constant GamePreRoutine = _GamePreRoutine;
+
+Constant TXT_SOMETHING_WRITTEN "It's something written there.";
+Constant TXT_HOLE_DESC "The hole is in the wall, where the mirror used to be. It's roughly circular, and about one foot wide.";
 
 ! ####################################
 !  Library initialization
@@ -120,6 +122,7 @@ Global high_temp = 0; ! ht in Basic program
 Global w1 = 0; ! Time passed, around bus stop
 Global robbed = 0; ! ro in Basic program
 Global inhaled_gas; ! o in Basic program
+Global last_shot_turn; ! On which turn was the player last shot at, in the garden?
 
 [ Hurrah;
 	deadflag = GS_WIN;
@@ -197,25 +200,26 @@ Include ">generated_parser.h";
 Include ">generated_grammar.inf";
 
 
-[ _GamePreRoutine;
-	if(faint && action ~= ##Inv or ##Quit or ##Help or ##Drink)
-		"I'm to faint..";
-	rfalse;
-];
+![ _GamePreRoutine;
+!	if(faint && action ~= ##Inv or ##Quit or ##Help or ##Drink)
+!		"I'm to faint..";
+!	rfalse;
+!];
 
 ! ####################################
 !  Game objects
 ! ####################################
 
-Object selfobj "yourself"
+Object selfobj "myself"
 	with
-		nouns 'me' 'myself' 'yourself',
+		nouns 'me' 'myself' 'yourself' 'mox',
 		get_shot_at [;
 			ByeBye(true);
 			rtrue;
 		],
 		daemon [;
-			if(Madman has animate && random(40)==17) {
+			if(Madman hasnt animate) { StopDaemon(self); rtrue; }
+			if(random(40)==17) {
 				killed++;
 				if(TestScope(Radio))
 				print"^Some sounds comes from the RADIO!^";
@@ -243,16 +247,10 @@ Object Bedroom "Bedroom"
 	with
 		description "I'm in a bedroom.",
 		after [;
-			Take:
-				if(noun == Rug) {
-					give BedroomHole ~absent;
-					MoveFloatingObjects();
-				}
-			Drop:
-				if(noun == Rug) {
-					give BedroomHole absent;
-					MoveFloatingObjects();
-				}
+			if(BedroomHole has absent && (Rug notin self || Rug has general)) {
+				give BedroomHole ~absent;
+				MoveFloatingObjects();
+			}
 		],
 		d_to [;
 			if(BedroomHole in real_location)
@@ -263,7 +261,9 @@ Object Bedroom "Bedroom"
 
 ! Object 1
 Object -> Money "Some money"
-	with nouns 'some' 'money',
+	with 
+		nouns 'some' 'money',
+		description "It amounts to exactly one dollar.",
 	has general proper;
 
 ! Object 2
@@ -274,6 +274,8 @@ Object -> Radio "Strange radio"
 		before [;
 			Listen:
 				"The madman has now killed ", killed, " persons.";
+			Open:
+				"There's not obvious way of opening it.";
 		],
 		break_it [;
 			if(real_location ~= Attic) "No. I still need it.";
@@ -287,8 +289,24 @@ Object -> Radio "Strange radio"
 
 ! Object 3
 Object -> Rug "Rug"
-	with nouns 'rug',
-	has general;
+	with 
+		nouns 'rug',
+		before [;
+			Push, Pull, Examine, LookUnder:
+				if(real_location == Bedroom && self hasnt general) {
+					give self general;
+					print "Moving the rug aside, I discover a hole in the floor.^";
+					RunRoutines(real_location, after);
+					rtrue;
+				}
+		],
+		after [;
+			Take:
+				if(real_location == Bedroom && self hasnt general) {
+					give self general;
+					"As I pick up the rug, I discover a hole in the floor.^";
+				}
+		];
 
 Object -> Telephone "Telephone"
 	with 
@@ -349,12 +367,12 @@ Object Cellar "Cellar"
 	has light scored;
 
 ! Object 4
-Object -> Jacket "Bullet proof jacket"
+Object -> Jacket "Bullet-proof jacket"
 	with 
-		nouns 'bullet' 'proof' 'jacket',
+		longnouns 'bullet' 'proof' 'bulletproof' 'bullet-proof' 'jacket',
 		invent [;
 			if(self in player && self has worn) {
-				print "I'm wearing a bullet proof jacket";
+				print "I'm wearing a bullet-proof jacket";
 				rtrue;
 			}
 		],
@@ -382,15 +400,27 @@ Object Garden "Garden"
 		description "I'm in a garden.",
 		e_to Bedroom,
 		maybe_get_shot [;
+			! This routine should return true if game ends
 			if(Jacket notin player || Jacket hasnt worn) {
 				print "^Someone shot me!!^";
 				ByeBye(true);
 				rtrue;
 			}
+			! If first chance to get shot, always get shot.
+			! If not, it's a 25% chance of getting shot, but never twice
+			! in the same turn.
+			if(self hasnt general || 
+					(last_shot_turn < turns && random(4) == 3)) {
+				last_shot_turn = turns;
+				give self general;
+				print "^Someone shot me!! It was quite painful, 
+					even with the bullet-proof jacket on.^";
+			}
 		],
 		before [;
 			Going:
-				return self.maybe_get_shot();
+				if(Jacket notin player || Jacket hasnt worn)
+					return self.maybe_get_shot();
 		],
 		each_turn [;
 			self.maybe_get_shot();
@@ -460,7 +490,7 @@ Object -> Gun "Gun"
 Object -> Letter "Letter"
 	with 
 		nouns 'letter',
-		description "It's something written there.",
+		description TXT_SOMETHING_WRITTEN,
 		read_description "In many cases RED is GOOD in others...",
 	has general;
 
@@ -505,13 +535,18 @@ Object Bathroom "Bathroom"
 Object -> Ammunition "Ammunition"
 	with 
 		nouns 'ammunition' 'ammo' 'bullets' 'rounds',
+		before [;
+			Insert:
+				if(second == Gun)
+					<<Load second>>;
+		],
 		bullets 6,
 	has general;
 
 Object -> BathroomNote "Note nailed to the wall."
 	with
 		nouns 'note' 'nailed',
-		description "It's something written there.",
+		description TXT_SOMETHING_WRITTEN,
 		read_description "In this case HELP might help.",
 		before [;
 			Take, Pull, Push, Turn: "Better leave it be.";
@@ -563,6 +598,9 @@ Object Mirror "Mirror"
 	with
 		nouns 'mirror',
 		description "Today I seem to be angry.",
+		get_shot_at [;
+			<<Break self>>;
+		],
 		break_it [;
 			give self absent;
 			give PiecesOfMirror ~absent;
@@ -579,26 +617,17 @@ Object Mirror "Mirror"
 
 Object PiecesOfMirror "Pieces of a mirror"
 	with
-		parse_name [ _i _w;
-			_w = NextWord();
-			if(_w == 'piece' or 'pieces') { 
-				_i++; 
-				_w = NextWord();
-				while(_w == 'of' or 'a//') {
-					_i++;
-					_w = NextWord();
-				}
-			}
-			if(_w == 'mirror')
-				_i++;
-			return _i;
+		longnouns 'piece' 'pieces' 'of' 'a//' 'mirror',
+		before [;
+			Take: "I'd cut myself, for sure.";
 		],
 		found_in LittleRoom BigRoom,
-	has static absent pluralname reactive;
+	has absent pluralname reactive;
 
 Object LittleHole "Little hole"
 	with
 		nouns 'little' 'hole',
+		description TXT_HOLE_DESC,
 		before [ ;
 			Enter:
 				"I'm to BIG!";
@@ -616,6 +645,7 @@ Object BigRoom "Big room"
 Object BigHole "Big hole"
 	with
 		nouns 'big' 'hole',
+		description TXT_HOLE_DESC,
 		before [ _dest;
 			Enter:
 				_dest = BigRoom;
@@ -644,6 +674,8 @@ Object -> TallBuildings "Tall buildings"
 		nouns 'tall' 'building' 'buildings',
 		before [;
 			Examine: rfalse;
+			Climb:
+				"These buildings have flat surfaces, providing little to grab on to.";
 			default:
 				PrintMsg(MSG_ABSURD);
 				rtrue;
@@ -697,6 +729,7 @@ Object SubwayStation "Subway station"
 	with
 		description "I'm in a subway station.",
 		w_to Streets,
+		u_to Streets,
 	has light;
 
 ! Object 17
@@ -715,6 +748,9 @@ Object -> Ticket "Ticket"
 					"I don't have any money.";
 			} else
 				"I have already bought it.";
+		Take:
+			if(self has concealed)
+				"I'll have to buy a ticket, if I want one.";
 		default:
 			if(self has concealed)
 				"I don't have a ticket.";
@@ -724,7 +760,7 @@ Object -> Ticket "Ticket"
 Object -> SubwayStationSign "Sign"
 	with
 		nouns 'sign',
-		description "It's something written there.",
+		description TXT_SOMETHING_WRITTEN,
 		read_description "PRICES:  One ticket 1 $.",
 	has static;
 
@@ -780,6 +816,11 @@ Object -> StairInSubwayAndHarbour "Stair"
 Object Harbour "Harbour"
 	with
 		description "I'm in the harbour.",
+		before [;
+			Listen:
+				if(noun == 0)
+					<<Listen Sailor>>;
+		],
 		e_to OutsideWarehouse,
 		w_to PartOfHarbour,
 		d_to StairInSubwayAndHarbour,
@@ -789,6 +830,8 @@ Object -> Ship "Ship"
 	with
 		nouns 'ship',
 		before [;
+			Enter, Climb:
+				"There are guards on the ship. The madman can't have gone there.";
 			Take, Push, Pull, Turn:
 				PrintMsg(MSG_ABSURD);
 				rtrue;
@@ -797,17 +840,17 @@ Object -> Ship "Ship"
 
 Object -> Sailor "Drunken sailor"
 	with
-		nouns 'drunken' 'sailor',
+		longnouns 'drunken' 'someone' 'mumbling' 'sailor' 'man' 'person',
 		before [;
 			Listen:
-				"The only thing I can get is: ..Stab him..";
+				"The only thing I can make out is: ~...Stab him...~";
 		],
 		get_shot_at [;
 			print "The cops came and got me!^";
 			ByeBye();
 			rtrue;
 		],
-		each_turn "^Someone is mumbeling.",
+		each_turn "^Someone is mumbling.",
 	has animate reactive;
 
 ! Room 12
@@ -817,10 +860,10 @@ Object PartOfHarbour "Part of harbour"
 		e_to Harbour,
 	has light;
 
-Object -> AdvertismentSign "Advertisment sign" ! [SIC]
+Object -> AdvertismentSign "Advertisement sign" ! [SIC]
 	with
-		nouns 'advert' 'ad' 'sign',
-		description "It's something written there.",
+		nouns 'advert' 'advertisement' 'ad' 'sign',
+		description TXT_SOMETHING_WRITTEN,
 		read_description "Coca-Cola adds life!",
 	has static;
 
@@ -835,7 +878,8 @@ Object OutsideWarehouse "Outside warehouse"
 
 Object -> WarehouseDummy "Warehouse"
 	with
-		nouns 'warehouse' 'ware' 'house',
+		longnouns 'warehouse' 'ware' 'house' 'drainpipe' 'drain' 'pipe',
+		description "The door stands slightly ajar. A drainpipe leads down from the roof.",
 		before [;
 			Climb:
 				print "OK^";
@@ -847,16 +891,18 @@ Object -> WarehouseDummy "Warehouse"
 				"I don't want to close it.";
 			Enter:
 				<<Go FAKE_IN_OBJ>>;
-!				print "OK^";
-!				PlayerTo(Warehouse);
-!				rtrue;
 		],
 	has concealed static scenery;
 
 ! Object 10
 Object -> Flashlight "Electric torch"
-	with 
+	with
 		nouns 'electric' 'torch' 'flashlight' 'lamp',
+		description [;
+			print "It is currently ";
+			if(self has on) "providing light.";
+			"turned off.";
+		],
 		after [;
 			SwitchOn:
 				give self light;
@@ -935,10 +981,11 @@ Object Bottle "Bottle"
 
 Object -> Coke "Coke"
 	with
-		nouns 'coke' 'cocacola' 'coca-cola',
+		longnouns 'coke' 'cocacola' 'coca-cola' 'coca' 'cola',
 		before [;
 			Examine: rfalse;
 			Drink:
+				if(faint == 0) "I'm not thirsty right now.";
 				faint = 0;
 				remove self;
 				scope_modified = true;
@@ -1083,6 +1130,11 @@ Object -> Knife "knife"
 		short_name [; 
 			if(self has general) print "Sharp "; else print "Dull ";
 		],
+		before [;
+			Sharpen:
+				if(self has general)
+					"The knife is already sharp.";
+		],
 		make_sharp [;
 			self.&nouns-->0 = 'sharp';
 			give self general;
@@ -1092,7 +1144,7 @@ Object -> Knife "knife"
 Object -> BusStopSign "Sign"
 	with
 		nouns 'sign',
-		description "It's something written there.",
+		description TXT_SOMETHING_WRITTEN,
 		read_description "The bus goes at: 6:30 PM",
 	has static;
 
@@ -1100,14 +1152,29 @@ Object -> BusStopSign "Sign"
 Object NearChurch "Nearby church"
 	with
 		description "I'm nearby a church.",
-		before [;
+		before [ _children;
 			Go:
-				if(direction == s_to &&
-						NearChurchDoor has open) {
-					print "OK^";
+				if(direction == s_to && NearChurchDoor has open && robbed == 0) {
+					robbed = 1;
+					faint = 1;
+					_children = children(player);
+					move Stone to Room2;
+					if(Knife in player)
+						move Knife to Attic;
+					if(Gun in player)
+						move Gun to Attic;
+					print "OK^
+						I'm hear footsteps behind me..^
+						EVERYTHING SPINS AROUND!!^
+						I'm somewere else. ";
+					if(_children == children(player))
+						print "Someone jumped me, but I managed to fend 
+							them off and run away.^";
+					else print "I've been robbed.^";
 					PlayerTo(Room, true);
 					rtrue;
 				}
+				
 		],
 		e_to Suburb,
 		s_to NearChurchDoor,
@@ -1145,7 +1212,7 @@ Object -> Rope "Rope"
 				print " which closes the door";
 			rtrue;
 		],
-		before [;
+		before [ ;
 			Cut:
 				if(second ~= 0 or Knife)
 					"That doesn't work.";
@@ -1162,34 +1229,18 @@ DoorClass -> NearChurchDoor "d5"
 	with
 		door_dir (s_to), ! (n_to),
 		door_to Room,
-!		found_in NearChurch,! Room,
-!		with_key PurpleKey,
 	;
 
 ! Room 21
 Object Room "Room"
 	with
 		description "I'm in a room.",
-		!n_to NearChurchDoor,
 		before [;
+			if(faint && action ~= ##Inv or ##Quit or ##Help or ##Drink)
+				"I'm to faint..";
 			Go:
 				if(direction == w_to && HoleInDoor hasnt absent)
 					<<Enter HoleInDoor>>;
-		],
-		each_turn [;
-			if(robbed == 0) {
-				robbed = 1;
-				faint = 1;
-				move Stone to Room2;
-				if(Knife in player)
-					move Knife to Attic;
-				if(Gun in player)
-					move Gun to Attic;
-				scope_modified = true;
-				"I'm hear footsteps behind me..^
-					EVERYTHING SPINS AROUND!!^
-					I'm somewere else. I've been robbed.^";
-			}
 		],
 		e_to Kitchen,
 		w_to RoomDoor,
@@ -1238,7 +1289,7 @@ Object Kitchen "Kitchen"
 Object -> Letter2 "Letter"
 	with 
 		nouns 'letter',
-		description "It's something written there.",
+		description TXT_SOMETHING_WRITTEN,
 		read_description "Ali Baba was here.",
 	has general;
 
@@ -1278,6 +1329,9 @@ Object EndOfHall "End of hall"
 	with
 		description "I'm in the end of the hall.",
 		before [;
+			Throw:
+				if(noun == Stone && second == 0 or GlassDoor)
+					<<Break GlassDoor Stone>>;
 			Say:
 				if(GlassDoor hasnt general ||
 						first_topic_word ~= 'sesam' or 'sesame') 
@@ -1317,7 +1371,11 @@ DoorClass -> GlassDoor "d7"
 
 ! Object 19
 Object PiecesOfGlass "Pieces of glass"
-	with nouns 'pieces' 'of' 'glass',
+	with 
+		longnouns 'piece' 'pieces' 'of' 'glass',
+		before [;
+			Take: "I'd cut myself, for sure.";
+		],
 	has general pluralname;
 
 ! Room 26
@@ -1464,7 +1522,7 @@ Object -> Madman "The madman"
 Object Note "Note"
 	with 
 		nouns 'note',
-		description "It's something written there.",
+		description TXT_SOMETHING_WRITTEN,
 		read_description "I'll blow this town to HELL....",
 	has general;
 
@@ -1634,11 +1692,17 @@ Object -> Wardrobe "Wardrobe"
 				if(self has open)
 					"I'm to big.";
 		],
+		after [;
+			Open:
+				print "You open the wardrobe, revealing:^";
+				TallPrintContents(self);
+				rtrue;
+		],
 	has static container openable;
 
 Object -> -> GasTube "Helium gas tube"
 	with
-		nouns 'helium' 'gas' 'tube' 'button',
+		longnouns 'helium' 'gas' 'tube' 'gastube' 'gas-tube' 'button',
 		description "I can see a button.",
 		before [ ;
 			Take:
@@ -1665,7 +1729,7 @@ Object -> -> GasTube "Helium gas tube"
 ! Object 23
 Object -> -> DivingSuit "Rubber diving suit"
 	with 
-		nouns 'rubber' 'diving' 'suit',
+		longnouns 'rubber' 'diving' 'suit' 'divingsuit' 'diving-suit' 'diver^s',
 		invent [;
 			if(self in player && self has worn) {
 				print "I'm wearing a rubber diving suit";
