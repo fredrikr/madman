@@ -957,6 +957,8 @@ Array g_put static table [
 	##Insert T_NOUN 'in' T_SECOND
 	##Insert T_NOUN 'into' T_SECOND
 	##PutOn T_NOUN 'on' T_SECOND
+	##Wear 'on' T_NOUN
+	##Wear T_NOUN 'on'
 ];
 
 Array g_inv static table [
@@ -1344,7 +1346,8 @@ Array g_eat static table [
 ];
 
 [ SesameSub;
-	"SESAME!^Nothing happened.";
+	print "SESAME!^Nothing happened.^";
+	run_after_routines_msg = 1;
 ];
 
 Array g_sesame static table [

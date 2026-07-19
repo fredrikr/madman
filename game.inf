@@ -8,6 +8,22 @@
 !% $TRANSCRIPT_FORMAT=1
 !!% $OMIT_SYMBOL_TABLE=1 ! Saves space, only possible without DEBUG mode
 
+! Madman
+!
+! Written in Basic for VIC-20 by Ove Friman in 1983. Ported to Inform 6 + NAIL
+! by Fredrik Ramsberg in 2026.
+!
+! Project homepage: https://github.com/fredrikr/madman
+!
+! Get NAIL at https://github.com/fredrikr/nail
+!
+! To build this game, you need the Inform 6 compiler, version 6.44 or higher,
+! and NAIL version 1.5.
+!
+! Release history:
+!
+! 2026-07-19 Release 1
+
 Include ">abbreviations.h";
 
 ! ####################################
@@ -19,7 +35,7 @@ Constant Headline   "^An interactive race against the clock^^
 						Type ABOUT for credits.^^";
 Constant NO_PLACES;
 
-Release 0;
+Release 1;
 Serial "260719";
 
 ! Get your own unique IFID for your game at https://www.tads.org/ifidgen/ifidgen
@@ -378,7 +394,7 @@ Object -> Jacket "Bullet-proof jacket"
 			}
 		],
 		before [;
-			Drop:
+			Drop, Disrobe:
 				if(self in player && self has worn) {
 					give self ~worn;
 					remove self;
@@ -727,10 +743,13 @@ Object -> TicketDispenser "Ticket dispenser"
 		parse_name [ _w _i _k;
 			_w = NextWord();
 			if(_w == 'ticket') { _i++; _w = NextWord(); }
-			while(_w == 'dispenser' or 'machine' or 'slot') { _w = NextWord(); _i++; _k++; }
+			while(_w == 'dispenser' or 'machine' or 'slot') { 
+				_w = NextWord(); _i++; _k++; 
+			}
 			if(_k) return _i;
 		],
-		description "It has a slot for money, and a tray where a ticket can be produced.",
+		description "It has a slot for inserting money, and a square hole 
+			where tickets come out.",
 		before [;
 			Receive:
 				if(noun == Money) {
@@ -780,10 +799,10 @@ Object -> Train "Train"
 	with
 		nouns 'train',
 		before [ _dest;
-			Take, Push, Pull, Turn:
+			Push, Pull, Turn:
 				PrintMsg(MSG_ABSURD);
 				rtrue;
-			Enter:
+			Take, Enter:
 				if(Ticket notin player) {
 					PrintMsg(MSG_CANT_DO_THAT_YET);
 					rtrue;
@@ -1428,14 +1447,19 @@ DoorClass -> AtticDoor "d8"
 
 ! Object 20 (will appear in Attic, when player breaks radio)
 Object LittleBomb "Little bomb"
+	! If LittleBomb has on, it has been activated and is ticking
+	! If it has general, it has exploded
 	with 
 		nouns 'little' 'bomb',
 		description "There is a button on it.",
 		time_left 0,
 		time_out [;
+			give madman general; ! Madman is alerted
+			give self ~on general;
 			if(TestScope(LittleBomb)) {
 				print"^BOOOOOM!!^";
 				ByeBye(true);
+				rtrue;
 			}
 			remove self;
 			print "^I hear a BOOOOM nearby.^";
@@ -1453,7 +1477,7 @@ Object -> BombButton "Bomb button"
 		nouns 'button',
 		before [;
 			Push:
-				give LittleBomb general;
+				give LittleBomb on;
 				StartTimer(LittleBomb, 3);
 				"CLICK!";
 		];
@@ -1468,12 +1492,24 @@ Object OnRoof "On roof"
 			rtrue;
 		],
 		e_to Attic,
+		after [;
+			Say, Sesame:
+				if(Madman has animate)
+					give Madman general;
+		],
 		each_turn [;
 			if(superparent(Radio) == self) {
 				print "^The radio started to sound strange. 
 					The madman turns AROUND!!^
 					HE SHOT ME!^";
 				ByeBye(true);
+				rtrue;
+			}
+			if(Madman has animate && Madman has general) { ! Madman is alert
+				print "^The madman spots me.
+					^HE SHOT ME!^";
+				ByeBye(true);
+				rtrue;
 			}
 		],
 	has light reactive;
@@ -1493,11 +1529,12 @@ Object -> Madman "The madman"
 		],
 		before [;
 			ThrownAt:
-				if(noun == LittleBomb && LittleBomb has general) {
+				if(noun == LittleBomb && noun has on) {
 					score = score + 35;
-					give Madman ~animate;
+					give Madman ~animate ~general;
 					StopTimer(noun);
 					remove noun;
+					give noun ~on general; ! No longer ticking, has exploded
 					move Note to real_location;
 					scope_modified = true;
 					"BOOM!... The madman is now DEAD!!";
@@ -1508,6 +1545,9 @@ Object -> Madman "The madman"
 			Attack:
 				if(self hasnt animate) "He's already dead.";
 				"How?";
+			Push, Pull, Turn:
+				if(self has animate)
+					"I can't reach him.";
 			Stab:
 				if(second ~= 0 or Knife)
 					"Stab him with WHAT??";
@@ -1527,7 +1567,7 @@ Object -> Madman "The madman"
 				rtrue;
 			}
 		],
-	has animate;
+	has animate reactive;
 
 ! Object 22, will appear here when madman dies
 Object Note "Note"
@@ -1793,15 +1833,19 @@ Object -> Table "Table"
 
 Object -> SwimmingPool "Swimming pool"
 	with
-		nouns 'swimming' 'pool',
+		nouns 'swimming' 'pool' 'water',
 		description "Can't see anything. The water is quite cloudy.",
 		before [;
+			Receive:
+				remove noun;
+				scope_modified = true;
+				"It disappears into the cloudy water.";
 			Enter:
 				print "AAAH!! PIRAYAS!!^";
 				ByeBye(true);
 				rtrue;
 		],
-	has static;
+	has static container open;
 
 ! Room 35
 Object InChair "In chair"
