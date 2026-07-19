@@ -237,8 +237,8 @@ Array dir_names -->
 
 
 [ TakeSub _parent _container_or_supporter _obj _count;
-	if(CommonAncestor(player, noun) == 0) return MSG_ABSURD;
-	if(noun has animate) return MSG_ABSURD;
+	if(CommonAncestor(player, noun) == 0 || noun has animate or scenery)
+		return MSG_ABSURD;
 	if(noun has static) return MSG_IS_STATIC;
 	if(noun in player) "I already have that.";
 	if(ObjectIsUntouchable(noun, false, true)) rtrue;
@@ -1305,9 +1305,11 @@ Array g_help static table [
 
 [ AboutSub;
 	"This game was written by Ove Friman, in Basic, for VIC-20, probably in 1983. 
-		Fredrik Ramsberg ported it to Inform 6 + NAIL in 2026. The original texts,
+		^^Fredrik Ramsberg ported it to Inform 6 + NAIL in 2026. The original texts,
 		with the occasional errors in spelling, grammar and punctuation, have been
-		kept intact as far as possible, for nostalgic reasons.
+		kept intact as far as possible, for nostalgic reasons. In some places, the
+		game has been made a little more forgiving. Many thanks to beta-testers
+		Garry Francis, Gianluca Girelli and Pablo Martinez.
 		^^The latest version can be found at https://github.com/fredrikr/madman";
 ];
 
@@ -1339,6 +1341,14 @@ Array g_break static table [
 Array g_eat static table [
 	##Eat
 	##Eat T_NOUN
+];
+
+[ SesameSub;
+	"SESAME!^Nothing happened.";
+];
+
+Array g_sesame static table [
+	##Sesame
 ];
 
 ! ########## END Custom actions
@@ -1775,6 +1785,8 @@ Array verb_grammar -->
 	'destroy'      g_break
 	'eat'          g_eat
 	'swallow'      g_eat
+	'sesame'       g_sesame
+	'sesam'        g_sesame
 	'extinguish'   g_extinguish
 	'about'        g_about
 	'wait'         g_wait

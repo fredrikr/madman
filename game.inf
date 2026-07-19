@@ -20,7 +20,7 @@ Constant Headline   "^An interactive race against the clock^^
 Constant NO_PLACES;
 
 Release 0;
-Serial "260718";
+Serial "260719";
 
 ! Get your own unique IFID for your game at https://www.tads.org/ifidgen/ifidgen
 Array UUID_ARRAY string "UUID://F5627028-7964-4D05-A2A6-91BBDC351615//"; 
@@ -114,6 +114,7 @@ Property simple_name;
 Property maybe_get_shot alias time_left; 
 Property bullets alias time_left; 
 Property make_sharp alias time_left; 
+Property perform_purchase alias time_left;
 
 Global killed = 7; ! w in Basic program
 Global faint = 0; ! fa in Basic program
@@ -617,12 +618,14 @@ Object Mirror "Mirror"
 
 Object PiecesOfMirror "Pieces of a mirror"
 	with
-		longnouns 'piece' 'pieces' 'of' 'a//' 'mirror',
+		longnouns 'piece' 'pieces' 'of' 'a//' 'mirror' 'glass',
+		description "All that's left are some pieces of glass on the floor,
+			and a hole in the wall where the mirror used to be.",
 		before [;
 			Take: "I'd cut myself, for sure.";
 		],
 		found_in LittleRoom BigRoom,
-	has absent pluralname reactive;
+	has absent pluralname;
 
 Object LittleHole "Little hole"
 	with
@@ -684,20 +687,7 @@ Object -> TallBuildings "Tall buildings"
 
 Object -> People "Lots of people"
 	with
-		parse_name [ _i _w;
-			_w = NextWord();
-			if(_w == 'lots') { 
-				_i++; 
-				_w = NextWord();
-				if(_w == 'of') {
-					_i++;
-					_w = NextWord();
-				}
-			}
-			if(_w == 'people')
-				_i++;
-			return _i;
-		],
+		nouns 'lots' 'of' 'people',
 		get_shot_at [;
 			print "The cops came and got me!^";
 			ByeBye();
@@ -711,7 +701,7 @@ Object -> People "Lots of people"
 				PrintMsg(MSG_ABSURD);
 				rtrue;
 		],
-	has static proper pluralname reactive;
+	has static proper pluralname;
 
 Object -> StairInStreet "Stair Leading Down"
 	with
@@ -732,18 +722,40 @@ Object SubwayStation "Subway station"
 		u_to Streets,
 	has light;
 
+Object -> TicketDispenser "Ticket dispenser"
+	with 
+		parse_name [ _w _i _k;
+			_w = NextWord();
+			if(_w == 'ticket') { _i++; _w = NextWord(); }
+			while(_w == 'dispenser' or 'machine' or 'slot') { _w = NextWord(); _i++; _k++; }
+			if(_k) return _i;
+		],
+		description "It has a slot for money, and a tray where a ticket can be produced.",
+		before [;
+			Receive:
+				if(noun == Money) {
+					Ticket.perform_purchase();
+					"OK, you get a ticket in return.";
+				}
+				"That doesn't fit.";
+		],
+	has static container open reactive;
+
 ! Object 17
 Object -> Ticket "Ticket"
 	with nouns 'ticket',
+	perform_purchase [;
+		remove Money;
+		move self to player;
+		give self ~concealed;
+		update_moved = true;
+	],
 	before [;
 		Buy:
 			if(self has concealed) {
 				if(Money in player) {
-					remove Money;
-					move self to player;
-					give self ~concealed;
-					update_moved = true;
-					"OK";
+					self.perform_purchase();
+					"OK, you now have a ticket.";
 				} else
 					"I don't have any money.";
 			} else
@@ -876,11 +888,14 @@ Object OutsideWarehouse "Outside warehouse"
 		in_to Warehouse,
 	has light;
 
-Object -> WarehouseDummy "Warehouse"
+Object -> DummyWarehouseOutside "Warehouse"
 	with
-		longnouns 'warehouse' 'ware' 'house' 'drainpipe' 'drain' 'pipe',
+		longnouns 'warehouse' 'house' 'drainpipe' 'drain' 'pipe' 'door' 'building',
 		description "The door stands slightly ajar. A drainpipe leads down from the roof.",
 		before [;
+			Take: 
+				PrintMsg(MSG_ABSURD);
+				rtrue;
 			Climb:
 				print "OK^";
 				PlayerTo(RoofOfWarehouse);
@@ -892,7 +907,7 @@ Object -> WarehouseDummy "Warehouse"
 			Enter:
 				<<Go FAKE_IN_OBJ>>;
 		],
-	has concealed static scenery;
+	has static;
 
 ! Object 10
 Object -> Flashlight "Electric torch"
@@ -915,9 +930,21 @@ Object -> Flashlight "Electric torch"
 Object Warehouse "Warehouse"
 	with
 		description "I'm in a warehouse.",
+		before [;
+			Exit:
+				if(noun == 0 or DummyWarehouseInside)
+					<<Go FAKE_OUT_OBJ>>;
+		],
 		w_to OutsideWarehouse,
 		out_to OutsideWarehouse,
 	has ~light scored;
+
+Object -> DummyWarehouseInside "Warehouse"
+	with
+		nouns 'warehouse' 'house' 'building',
+		description "It's large, and almost completely empty.",
+	has scenery concealed;
+
 
 Object -> Steelboxes "Some steelboxes"
 	with
@@ -947,22 +974,8 @@ Object -> Woodbox "One woodbox"
 	has proper;
 
 Object WoodboxPieces "Pices of a box"
-	with
-		parse_name [ _i _w;
-			_w = NextWord();
-			if(_w == 'piece' or 'pieces' or 'pice' or 'pices') { 
-				_i++; 
-				_w = NextWord();
-				while(_w == 'of' or 'a//') {
-					_i++;
-					_w = NextWord();
-				}
-			}
-			if(_w == 'wood' or 'wooden' or 'box')
-				_i++;
-			return _i;
-		],
-	has proper pluralname reactive;
+	with longnouns 'piece' 'pieces' 'pice' 'pices' 'of' 'a//' 'wood' 'wooden' 'box',
+	has proper pluralname;
 
 ! Object 18
 Object Bottle "Bottle"
@@ -1244,13 +1257,16 @@ Object Room "Room"
 		],
 		e_to Kitchen,
 		w_to RoomDoor,
-	has ~light reactive;
+	has ~light;
 
 DoorClass RoomDoor "d6"
 	with
 		nouns 'wood' 'wooden' 'door',
 		short_name "Closed wood door",
 		before [;
+			Break:
+				"The door doesn't look very strong, but appears strong 
+					enough that I can't cause any real damage with my hands.";
 			Kick:
 				if(HoleInDoor hasnt absent) rfalse;
 				give HoleInDoor ~absent;
@@ -1332,12 +1348,14 @@ Object EndOfHall "End of hall"
 			Throw:
 				if(noun == Stone && second == 0 or GlassDoor)
 					<<Break GlassDoor Stone>>;
-			Say:
-				if(GlassDoor hasnt general ||
-						first_topic_word ~= 'sesam' or 'sesame') 
-					"Nothing happens.";
-				give GlassDoor ~locked;
-				"ZZZZZzzz  CLICK!";
+			Say, Sesame:
+				if(GlassDoor has general && ! Glass has been broken 
+						GlassDoor has locked && ! Door is locked
+						(action == ##Sesame || first_topic_word == 'sesam' or 'sesame')) {
+					give GlassDoor ~locked;
+					"SESAME!
+					^ZZZZZzzz  CLICK!";
+				}
 		],
 		e_to Hall,
 		w_to GlassDoor,
@@ -1357,11 +1375,16 @@ DoorClass -> GlassDoor "d7"
 				if(self hasnt general) "It's all just a big plate of glass.";
 				"Actually, I can't even find a keyhole.";
 		],
-		break_it [;
+		break_it [ _addr;
 			if(self has general) "That seems pointless.";
 			if(second == 0) "Break it with WHAT??";
 			if(second ~= Stone) "I'd need a more suitable tool.";
 			give self general;
+			_addr = self.&nouns;
+			! Remove synonyms that are no longer valid, e.g. "glass"
+			_addr-->1 = 0;
+			_addr-->2 = 0;
+			_addr-->3 = 0;
 			move PiecesOfGlass to EndOfHall;
 			scope_modified = true;
 			"CRACK!!";
@@ -1382,6 +1405,7 @@ Object PiecesOfGlass "Pieces of glass"
 Object Attic "Attic"
 	with
 		description "I'm in a musty attic.",
+		s_to AtticDoor,
 		e_to EndOfHall,
 		u_to AtticStair,
 	has light scored;
@@ -1400,7 +1424,6 @@ DoorClass -> AtticDoor "d8"
 	with 
 		door_dir (w_to),
 		door_to Attic,
-!		with_key PurpleKey,
 	;
 
 ! Object 20 (will appear in Attic, when player breaks radio)
@@ -1408,26 +1431,11 @@ Object LittleBomb "Little bomb"
 	with 
 		nouns 'little' 'bomb',
 		description "There is a button on it.",
-!		before [;
-!			Throw:
-!				if(self notin player) rfalse;
-!				if(self hasnt general)
-!					<<Drop self>>;
-!				if(TestScope(Madman)) {
-!					give Madman ~animate;
-!					StopTimer(self);
-!					remove self;
-!					move Note to real_location;
-!					scope_modified = true;
-!					"BOOM!... The madman is now DEAD!!";
-!				}
-!		],
 		time_left 0,
 		time_out [;
 			if(TestScope(LittleBomb)) {
 				print"^BOOOOOM!!^";
 				ByeBye(true);
-				rtrue;
 			}
 			remove self;
 			print "^I hear a BOOOOM nearby.^";
@@ -1445,10 +1453,8 @@ Object -> BombButton "Bomb button"
 		nouns 'button',
 		before [;
 			Push:
-				if(LittleBomb hasnt general) {
-					give LittleBomb general;
-					StartTimer(LittleBomb, 2);
-				}
+				give LittleBomb general;
+				StartTimer(LittleBomb, 3);
 				"CLICK!";
 		];
 
@@ -1475,6 +1481,11 @@ Object OnRoof "On roof"
 Object -> Madman "The madman"
 	with
 		nouns 'madman' 'mad' 'man',
+		description [;
+			if(self has animate)
+				"He seems lost in thought, gazing out over the city.";
+			"He's dead. It's not a pretty sight.";
+		],
 		short_name [;
 			if(self has animate) rfalse;
 			print "Dead madman";
@@ -1783,7 +1794,7 @@ Object -> Table "Table"
 Object -> SwimmingPool "Swimming pool"
 	with
 		nouns 'swimming' 'pool',
-		description "Can't see anything.",
+		description "Can't see anything. The water is quite cloudy.",
 		before [;
 			Enter:
 				print "AAAH!! PIRAYAS!!^";
@@ -1832,7 +1843,7 @@ Object -> "Yellow button"
 
 Object BigBomb "big bomb"
 	with
-		time_left 21, ! dx in Basic program
+		time_left 26, ! dx in Basic program, lasts 25 turns (was 20 in Basic program)
 		daemon [ dx;
 			dx = self.time_left - 1;
 			self.time_left = dx;
