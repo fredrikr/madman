@@ -5,8 +5,10 @@ This is a small text adventure, which was originally written by Ove Friman, in t
 
 This port uses the [NAIL framework](https://github.com/fredrikr/nail).
 
+The game is very compact and efficient, so it should be perfectly playable on any 8-bit platform that has a Z-code interpreter.
+
 ## Credits
 
-This game was written by Ove Friman, some time in the 80s.
+This game was written by Ove Friman, in 1983.
 
-I, Fredrik Ramsberg, ported it to Inform 6 + NAIL, in 2026.
+I, Fredrik Ramsberg, ported it to Inform 6 + NAIL / Z-code, in 2026.
